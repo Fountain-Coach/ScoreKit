@@ -29,6 +29,8 @@ public struct LayoutTree: Sendable {
     public let hairpins: [LayoutHairpin]
     public let barX: [CGFloat]
     public let beatPos: [Double]
+    public let beamGroups: [[Int]]
+    public let beamLevels: [Int]
 }
 
 public struct ScoreHit: Sendable { public let index: Int }
@@ -108,7 +110,8 @@ public struct SimpleRenderer: ScoreRenderable {
                 }
             }
         }
-        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos)
+        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos)
+        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     public func draw(_ tree: LayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -319,15 +322,6 @@ public struct SimpleRenderer: ScoreRenderable {
         }
     }
 
-    private func beamLevelFor(_ el: LayoutElement) -> Int {
-        switch el.kind {
-        case .note(_, let d):
-            switch d.den { case 8: return 1; case 16: return 2; case 32: return 3; default: return 0 }
-        case .rest:
-            return 0
-        }
-    }
-
     private func advance(for e: NotatedEvent) -> CGFloat {
         let base: CGFloat = 24
         switch e.base {
@@ -341,6 +335,46 @@ public struct SimpleRenderer: ScoreRenderable {
             default: return base
             }
         }
+    }
+
+    private func computeBeams(elements: [LayoutElement], beatPos: [Double]) -> ([[Int]], [Int]) {
+        var groups: [[Int]] = []
+        var levels: [Int] = Array(repeating: 0, count: elements.count)
+        var i = 0
+        while i < elements.count {
+            guard i < beatPos.count else { break }
+            guard case .note(_, let d) = elements[i].kind, d.den >= 8 else { i += 1; continue }
+            levels[i] = beamLevelFor(elements[i])
+            let startBeat = intBeatIndex(beatPos[i])
+            var j = i + 1
+            var group: [Int] = [i]
+            while j < elements.count, j < beatPos.count {
+                guard case .note(_, let d2) = elements[j].kind, d2.den >= 8 else { break }
+                if intBeatIndex(beatPos[j]) != startBeat { break }
+                levels[j] = beamLevelFor(elements[j])
+                group.append(j)
+                j += 1
+            }
+            if group.count >= 2 { groups.append(group) }
+            i = j
+        }
+        return (groups, levels)
+    }
+
+    private func beamLevelFor(_ el: LayoutElement) -> Int {
+        switch el.kind {
+        case .note(_, let d):
+            switch d.den { case 8: return 1; case 16: return 2; case 32: return 3; default: return 0 }
+        case .rest:
+            return 0
+        }
+    }
+
+    private func intBeatIndex(_ pos: Double) -> Int {
+        // Treat exact integer positions as belonging to the previous beat
+        let rounded = round(pos)
+        if abs(pos - rounded) < 1e-9 { return Int(max(0, rounded - 1)) }
+        return Int(floor(pos))
     }
 }
 
