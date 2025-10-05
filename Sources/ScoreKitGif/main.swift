@@ -29,24 +29,35 @@ func addFrame(_ image: CGImage, to dest: CGImageDestination, delay: Double) {
 }
 
 // Prepare simple events
-enum DemoKind { case base, widened }
+enum DemoKind { case base, annotated }
+// German C‑Dur Tonleiter (C D E F G A H C') — all Viertel (quarters) for clarity
 func makeEvents(kind: DemoKind) -> [NotatedEvent] {
-    var evs: [NotatedEvent] = [
-        .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8)), hairpinStart: .crescendo),
-        .init(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,8)), slurStart: true, articulations: [.staccato]),
-        .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8)), slurEnd: true, hairpinEnd: true, dynamic: .mf),
-        .init(base: .rest(duration: Duration(1,4))),
-        .init(base: .note(pitch: Pitch(step: .F, alter: 0, octave: 4), duration: Duration(1,8))),
-        .init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: kind == .base ? Duration(1,8) : Duration(1,2))),
-        .init(base: .note(pitch: Pitch(step: .A, alter: 0, octave: 4), duration: Duration(1,8))),
-        .init(base: .note(pitch: Pitch(step: .B, alter: 0, octave: 4), duration: Duration(1,8)))
+    let pitches: [Pitch] = [
+        .init(step: .C, alter: 0, octave: 4),
+        .init(step: .D, alter: 0, octave: 4),
+        .init(step: .E, alter: 0, octave: 4),
+        .init(step: .F, alter: 0, octave: 4),
+        .init(step: .G, alter: 0, octave: 4),
+        .init(step: .A, alter: 0, octave: 4),
+        .init(step: .B, alter: 0, octave: 4), // German H
+        .init(step: .C, alter: 0, octave: 5)
     ]
+    var evs: [NotatedEvent] = pitches.enumerated().map { (i, p) in
+        .init(base: .note(pitch: p, duration: Duration(1,4)))
+    }
+    if kind == .annotated {
+        // Significant, but clean: a single crescendo hairpin across the scale and a closing slur on the last 4 notes
+        evs[0].hairpinStart = .crescendo
+        evs[7].hairpinEnd = true
+        evs[4].slurStart = true
+        evs[7].slurEnd = true
+    }
     return evs
 }
 
 let renderer = SimpleRenderer()
-var opts = LayoutOptions(); opts.timeSignature = (4,4); opts.padding = CGSize(width: 40, height: 28)
-let size = CGSize(width: 1024, height: 260)
+var opts = LayoutOptions(); opts.timeSignature = (4,4); opts.padding = CGSize(width: 60, height: 36)
+let size = CGSize(width: 1024, height: 280)
 let rect = CGRect(origin: .zero, size: size)
 
 // Output path
@@ -54,9 +65,9 @@ let docsDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).app
 try? FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
 let outURL = docsDir.appendingPathComponent("scorekit-demo.gif")
 
-let preHold = 8
-let transition = 6
-let postHold = 10
+let preHold = 12
+let transition = 8
+let postHold = 14
 let totalFrames = preHold + transition + postHold
 guard let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
     fatalError("Could not create GIF destination")
@@ -67,10 +78,9 @@ CGImageDestinationSetProperties(dest, gifProps as CFDictionary)
 // Precompute trees to avoid per-frame relayout flicker
 let baseEvents = makeEvents(kind: .base)
 let baseTree = renderer.layout(events: baseEvents, in: rect, options: opts)
-var widenedEvents = baseEvents
-let changedIndex = 5
-widenedEvents[changedIndex] = .init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: Duration(1,2)))
-let afterTree = renderer.updateLayout(previous: baseTree, events: widenedEvents, in: rect, options: opts, changed: [changedIndex])
+let annotatedEvents = makeEvents(kind: .annotated)
+// Hairpin/slur do not alter spacing; still use updateLayout for consistency
+let afterTree = renderer.updateLayout(previous: baseTree, events: annotatedEvents, in: rect, options: opts, changed: Set(0..<annotatedEvents.count))
 
 for frame in 0..<totalFrames {
     let ctx = makeContext(size: size)
@@ -86,20 +96,10 @@ for frame in 0..<totalFrames {
         ctx.saveGState(); ctx.setAlpha(CGFloat(1.0 - t)); renderer.draw(baseTree, in: ctx, options: opts); ctx.restoreGState()
         ctx.saveGState(); ctx.setAlpha(CGFloat(t)); renderer.draw(afterTree, in: ctx, options: opts); ctx.restoreGState()
     } else {
-        // After state hold, with very subtle pulse around the changed note
+        // After state hold
         renderer.draw(afterTree, in: ctx, options: opts)
-        if changedIndex < afterTree.elements.count {
-            let f = afterTree.elements[changedIndex].frame.insetBy(dx: -10, dy: -10)
-            let tt = Double(frame - (preHold + transition)) / Double(max(1, postHold))
-            let alpha = 0.08 + 0.06 * 0.5 * (1.0 + sin(2 * Double.pi * tt))
-            ctx.setFillColor(CGColor(red: 0.2, green: 0.55, blue: 1.0, alpha: alpha))
-            ctx.fill(f)
-            ctx.setStrokeColor(CGColor(red: 0.2, green: 0.55, blue: 1.0, alpha: min(0.6, alpha + 0.15)))
-            ctx.setLineWidth(2)
-            ctx.stroke(f)
-        }
     }
-    if let img = ctx.makeImage() { addFrame(img, to: dest, delay: 0.28) }
+    if let img = ctx.makeImage() { addFrame(img, to: dest, delay: 0.36) }
 }
 
 if !CGImageDestinationFinalize(dest) {
