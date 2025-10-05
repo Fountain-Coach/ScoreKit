@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "ScoreKit", targets: ["ScoreKit"]),
         .library(name: "ScoreKitUI", targets: ["ScoreKitUI"]),
+        .executable(name: "ScoreKitDemo", targets: ["ScoreKitDemo"]),
     ],
     targets: [
         .target(
@@ -30,6 +31,11 @@ let package = Package(
             name: "ScoreKitUITests",
             dependencies: ["ScoreKitUI"],
             path: "Tests/ScoreKitUITests"
+        ),
+        .executableTarget(
+            name: "ScoreKitDemo",
+            dependencies: ["ScoreKitUI"],
+            path: "Sources/ScoreKitDemo"
         ),
     ]
 )
