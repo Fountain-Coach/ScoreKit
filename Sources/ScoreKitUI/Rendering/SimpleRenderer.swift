@@ -42,7 +42,7 @@ public struct SimpleRenderer: ScoreRenderable {
 
     public func layout(events: [NotatedEvent], in rect: CGRect, options: LayoutOptions) -> LayoutTree {
         let staffHeight = options.staffSpacing * 4 // 5 lines = 4 gaps
-        let width = options.padding.width * 2 + CGFloat(events.count) * options.noteSpacing
+        var width = options.padding.width * 2
         let height = options.padding.height * 2 + staffHeight + 40 // extra for hairpins/ledger
         var elements: [LayoutElement] = []
         var slurs: [LayoutSlur] = []
@@ -51,8 +51,9 @@ public struct SimpleRenderer: ScoreRenderable {
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
         let optionsBarIndices = Set(options.barIndices)
 
+        var cursorX = origin.x
         for (i, e) in events.enumerated() {
-            let x = origin.x + CGFloat(i) * options.noteSpacing
+            let x = cursorX
             if optionsBarIndices.contains(i) { barX.append(x) }
             let y: CGFloat
             let frame: CGRect
@@ -66,6 +67,9 @@ public struct SimpleRenderer: ScoreRenderable {
                 frame = CGRect(x: x - 4, y: y - 4, width: 8, height: 8)
                 elements.append(LayoutElement(index: i, kind: .rest, frame: frame))
             }
+            // advance cursor based on duration
+            cursorX += advance(for: e)
+            width = max(width, cursorX + options.padding.width)
             if e.slurStart {
                 if let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) {
                     slurs.append(LayoutSlur(startIndex: i, endIndex: end))
@@ -185,6 +189,30 @@ public struct SimpleRenderer: ScoreRenderable {
             }
             ctx.strokePath()
         }
+
+        // Draw naive beaming for consecutive eighth-or-shorter notes
+        var i = 0
+        while i < tree.elements.count {
+            guard case .note(_, let d) = tree.elements[i].kind, d.den >= 8 else { i += 1; continue }
+            var j = i + 1
+            var group: [Int] = [i]
+            while j < tree.elements.count, case .note(_, let d2) = tree.elements[j].kind, d2.den >= 8 {
+                group.append(j); j += 1
+            }
+            if group.count >= 2 {
+                let yBase = tree.elements[group.first!].frame.midYVal
+                let stemUp = yBase < (options.padding.height + options.staffSpacing * 2)
+                let y = stemUp ? (tree.elements[group.first!].frame.midYVal - 30) : (tree.elements[group.first!].frame.midYVal + 30)
+                ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+                ctx.setLineWidth(3)
+                let xStart = tree.elements[group.first!].frame.midXVal
+                let xEnd = tree.elements[group.last!].frame.midXVal
+                ctx.move(to: CGPoint(x: xStart, y: y))
+                ctx.addLine(to: CGPoint(x: xEnd, y: y))
+                ctx.strokePath()
+            }
+            i = j
+        }
     }
 
     public func hitTest(_ tree: LayoutTree, at point: CGPoint) -> ScoreHit? {
@@ -214,6 +242,21 @@ public struct SimpleRenderer: ScoreRenderable {
         case 16: return 2
         case 32: return 3
         default: return 0
+        }
+    }
+
+    private func advance(for e: NotatedEvent) -> CGFloat {
+        let base: CGFloat = 24
+        switch e.base {
+        case .rest(let d), .note(_, let d):
+            switch d.den {
+            case 1: return base * 3.0
+            case 2: return base * 2.0
+            case 4: return base * 1.4
+            case 8: return base * 1.1
+            case 16: return base * 0.9
+            default: return base
+            }
         }
     }
 }

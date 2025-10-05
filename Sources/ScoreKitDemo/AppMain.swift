@@ -26,13 +26,16 @@ struct DemoView: View {
     @State private var cues: [Cue] = []
     @StateObject private var playhead = Playhead()
     @State private var bpm: Double = 120
+    @State private var lastRange: Set<Int> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("ScoreKit Demo").font(.title2).padding(.top, 4)
-            ScoreView(events: events, barIndices: bars, highlighter: controller.highlighter, selection: $controller.selected) { sel in
+            ScoreView(events: events, barIndices: bars, highlighter: controller.highlighter, selection: $controller.selected, onSelect: { sel in
                 selected = sel
-            }
+            }, onSelectRange: { set in
+                lastRange = set
+            })
             HStack {
                 // Playback controls
                 Button(playhead.isPlaying ? "Stop Playhead" : "Start Playhead") {
@@ -67,6 +70,37 @@ struct DemoView: View {
                     if player.isPlaying { player.stop() }
                     else { buildStoryboard(); player.play(cues: cues, controller: controller) }
                 }
+                Divider()
+                Button("UMP → Console") {
+                    let engine = PlaybackEngine()
+                    let sink = CollectingSink()
+                    try? engine.schedule(events: events, channel: 0, tempo: Tempo(bpm: bpm), startTime: 0, sink: sink)
+                    // Encode and dump
+                    var all: [UInt32] = []
+                    for item in sink.scheduled {
+                        switch item.message {
+                        case .noteOn, .noteOff:
+                            all.append(contentsOf: UMPEncoder.encode(item.message, group: 0, mode: .midi2_64bit))
+                        default: continue
+                        }
+                    }
+                    print("UMP64:", UMPDump.hexWords(all))
+                }
+#if canImport(CoreMIDI)
+                Button("UMP → CoreMIDI (dest 0)") {
+                    let engine = PlaybackEngine()
+                    let sink = CollectingSink()
+                    try? engine.schedule(events: events, channel: 0, tempo: Tempo(bpm: bpm), startTime: 0, sink: sink)
+                    let sender = CoreMIDISender()
+                    var scheduled: [(TimeInterval, [UInt32])] = []
+                    for it in sink.scheduled {
+                        let words = UMPEncoder.encode(it.message, group: 0, mode: .midi2_64bit)
+                        scheduled.append((it.time, words))
+                    }
+                    // Best-effort: send immediately ignoring schedule
+                    for (_, words) in scheduled { sender?.sendUMP(words: words, to: 0) }
+                }
+#endif
             }
             .buttonStyle(.borderedProminent)
         }
