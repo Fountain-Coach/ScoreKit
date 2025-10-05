@@ -2,6 +2,8 @@
 
 ![ScoreKit demo](Docs/scorekit-demo.gif)
 
+Watch as MP4 (smoother): Docs/scorekit-demo.mp4
+
 Swift library unifying LilyPond engraving (publication-quality) with real‑time Swift rendering and AudioTalk semantics.
 
 Highlights
