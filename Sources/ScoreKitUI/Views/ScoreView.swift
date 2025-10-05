@@ -1,17 +1,20 @@
 import SwiftUI
 import ScoreKit
 
+@MainActor
 public struct ScoreView: View {
     private let events: [NotatedEvent]
     private let barIndices: [Int]
     private let renderer = SimpleRenderer()
     private let onSelect: ((Int?) -> Void)?
+    @ObservedObject private var highlighter: ScoreHighlighter
     @State private var selected: Int? = nil
 
-    public init(events: [NotatedEvent], barIndices: [Int] = [], onSelect: ((Int?) -> Void)? = nil) {
+    public init(events: [NotatedEvent], barIndices: [Int] = [], highlighter: ScoreHighlighter? = nil, onSelect: ((Int?) -> Void)? = nil) {
         self.events = events
         self.barIndices = barIndices
         self.onSelect = onSelect
+        self._highlighter = ObservedObject(initialValue: highlighter ?? ScoreHighlighter())
     }
 
     public var body: some View {
@@ -30,6 +33,16 @@ public struct ScoreView: View {
                         cg.setLineWidth(2)
                         cg.stroke(frame)
                     }
+                    // Flash highlights
+                    if highlighter.opacity > 0.0, !highlighter.indices.isEmpty {
+                        cg.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: highlighter.opacity * 0.35))
+                        for idx in highlighter.indices {
+                            if idx >= 0, idx < tree.elements.count {
+                                let f = tree.elements[idx].frame.insetBy(dx: -10, dy: -10)
+                                cg.fill(f)
+                            }
+                        }
+                    }
                 }
             }
             .contentShape(Rectangle())
@@ -41,6 +54,7 @@ public struct ScoreView: View {
                 let hit = renderer.hitTest(tree, at: value.location)
                 selected = hit?.index
                 onSelect?(selected)
+                if let idx = selected { highlighter.flash(indices: [idx]) }
             })
         }
         .frame(minHeight: 160)
