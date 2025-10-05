@@ -7,13 +7,15 @@ public struct ScoreView: View {
     private let barIndices: [Int]
     private let renderer = SimpleRenderer()
     private let onSelect: ((Int?) -> Void)?
+    private let selectedBinding: Binding<Int?>?
     @ObservedObject private var highlighter: ScoreHighlighter
     @State private var selected: Int? = nil
 
-    public init(events: [NotatedEvent], barIndices: [Int] = [], highlighter: ScoreHighlighter? = nil, onSelect: ((Int?) -> Void)? = nil) {
+    public init(events: [NotatedEvent], barIndices: [Int] = [], highlighter: ScoreHighlighter? = nil, selection: Binding<Int?>? = nil, onSelect: ((Int?) -> Void)? = nil) {
         self.events = events
         self.barIndices = barIndices
         self.onSelect = onSelect
+        self.selectedBinding = selection
         self._highlighter = ObservedObject(initialValue: highlighter ?? ScoreHighlighter())
     }
 
@@ -27,7 +29,8 @@ public struct ScoreView: View {
                 ctx.withCGContext { cg in
                     renderer.draw(tree, in: cg, options: opts)
                     // Selection highlight
-                    if let sel = selected, sel >= 0, sel < tree.elements.count {
+                    let selIndex = selectedBinding?.wrappedValue ?? selected
+                    if let sel = selIndex, sel >= 0, sel < tree.elements.count {
                         let frame = tree.elements[sel].frame.insetBy(dx: -4, dy: -4)
                         cg.setStrokeColor(CGColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0))
                         cg.setLineWidth(2)
@@ -52,9 +55,11 @@ public struct ScoreView: View {
                 let rect = CGRect(origin: .zero, size: proxy.size)
                 let tree = renderer.layout(events: events, in: rect, options: opts)
                 let hit = renderer.hitTest(tree, at: value.location)
-                selected = hit?.index
-                onSelect?(selected)
-                if let idx = selected { highlighter.flash(indices: [idx]) }
+                let newSel = hit?.index
+                selected = newSel
+                selectedBinding?.wrappedValue = newSel
+                onSelect?(newSel)
+                if let idx = newSel { highlighter.flash(indices: [idx]) }
             })
         }
         .frame(minHeight: 160)
