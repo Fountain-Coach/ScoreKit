@@ -26,6 +26,10 @@ let package = Package(
             dependencies: ["ScoreKit"],
             path: "Tests/ScoreKitTests"
         ),
+        .testTarget(
+            name: "ScoreKitUITests",
+            dependencies: ["ScoreKitUI"],
+            path: "Tests/ScoreKitUITests"
+        ),
     ]
 )
-
