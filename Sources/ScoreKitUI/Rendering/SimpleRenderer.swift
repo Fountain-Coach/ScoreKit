@@ -28,6 +28,7 @@ public struct LayoutTree: Sendable {
     public let slurs: [LayoutSlur]
     public let hairpins: [LayoutHairpin]
     public let barX: [CGFloat]
+    public let beatPos: [Double]
 }
 
 public struct ScoreHit: Sendable { public let index: Int }
@@ -57,6 +58,8 @@ public struct SimpleRenderer: ScoreRenderable {
         let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
         let beatUnit = max(1, options.timeSignature.beatUnit)
         var yCache: [Pitch: CGFloat] = [:]
+        var beatPos: [Double] = []
+        var beatAccum: Double = 0
         for (i, e) in events.enumerated() {
             let x = cursorX
             if optionsBarIndices.contains(i) { barX.append(x) }
@@ -80,12 +83,19 @@ public struct SimpleRenderer: ScoreRenderable {
             // advance cursor based on duration
             cursorX += advance(for: e)
             width = max(width, cursorX + options.padding.width)
+            // accumulate beat position within current bar
+            let frac = beatFraction(for: e, beatUnit: beatUnit)
+            beatAccum += frac
+            let posInBar = beatAccum.truncatingRemainder(dividingBy: Double(beatsPerBar))
+            beatPos.append(posInBar)
             // insert computed barlines based on time signature
             let eb = beats(for: e, beatUnit: beatUnit)
             beatsInBar += eb
             while beatsInBar >= beatsPerBar {
                 barX.append(cursorX)
                 beatsInBar -= beatsPerBar
+                // align accumulator to bar
+                beatAccum = floor(beatAccum)
             }
             if e.slurStart {
                 if let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) {
@@ -98,7 +108,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 }
             }
         }
-        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX)
+        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos)
     }
 
     public func draw(_ tree: LayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -207,14 +217,17 @@ public struct SimpleRenderer: ScoreRenderable {
             ctx.strokePath()
         }
 
-        // Draw naive beaming for consecutive eighth-or-shorter notes
+        // Draw beaming across consecutive eighth-or-shorter notes; break at beat boundaries
         var i = 0
         while i < tree.elements.count {
             guard case .note(_, let d) = tree.elements[i].kind, d.den >= 8 else { i += 1; continue }
+            let startBeat = floor(tree.beatPos[i])
             var j = i + 1
             var group: [Int] = [i]
             while j < tree.elements.count, case .note(_, let d2) = tree.elements[j].kind, d2.den >= 8 {
-                group.append(j); j += 1
+                if floor(tree.beatPos[j]) != startBeat { break }
+                group.append(j)
+                j += 1
             }
             if group.count >= 2 {
                 let yBase = tree.elements[group.first!].frame.midYVal
@@ -278,6 +291,13 @@ public struct SimpleRenderer: ScoreRenderable {
     private func beats(den: Int, beatUnit: Int) -> Int {
         // beats = (1/den) / (1/beatUnit) = beatUnit/den (integer approximation)
         return max(1, beatUnit / max(1, den))
+    }
+
+    private func beatFraction(for e: NotatedEvent, beatUnit: Int) -> Double {
+        switch e.base {
+        case .note(_, let d): return Double(beatUnit) / Double(max(1, d.den))
+        case .rest(let d): return Double(beatUnit) / Double(max(1, d.den))
+        }
     }
 
     private func advance(for e: NotatedEvent) -> CGFloat {
