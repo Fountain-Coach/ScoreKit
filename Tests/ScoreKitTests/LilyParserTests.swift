@@ -15,9 +15,10 @@ final class LilyParserTests: XCTestCase {
 
     func testRoundTripSubset() {
         let base: [NotatedEvent] = [
-            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8)), hairpinStart: .crescendo),
-            .init(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,8)), slurStart: true, articulations: [.staccato]),
-            .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8)), slurEnd: true, hairpinEnd: true, dynamic: .mf),
+            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8)), articulations: [.marcato], hairpinStart: .crescendo),
+            .init(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,8)), slurStart: true, articulations: [.staccato, .tenuto]),
+            .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8)), slurEnd: true, hairpinEnd: true, tieStart: true, dynamic: .mf),
+            .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8)), tieEnd: true),
             .init(base: .rest(duration: Duration(1,4)))
         ]
         let ly = LilyEmitter.emit(notated: base, title: "RoundTrip")
@@ -26,6 +27,9 @@ final class LilyParserTests: XCTestCase {
         XCTAssertTrue(sanitize(ly).contains("c'8"))
         XCTAssertTrue(sanitize(ly2).contains("c'8"))
         XCTAssertTrue(sanitize(ly2).contains("\\mf"))
+        XCTAssertTrue(ly.contains("-^"))
+        XCTAssertTrue(ly.contains("-_"))
+        XCTAssertTrue(ly.contains("~"))
     }
 
     private func sanitize(_ s: String) -> String {
@@ -35,4 +39,3 @@ final class LilyParserTests: XCTestCase {
             .replacingOccurrences(of: "}", with: "")
     }
 }
-

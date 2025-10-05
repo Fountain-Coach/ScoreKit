@@ -18,6 +18,7 @@ public enum LilyParser {
             .replacingOccurrences(of: "}", with: " ")
         let tokens = cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
 
+        var lastTiePending: (idx: Int, pitch: Pitch)? = nil
         for tok in tokens {
             if tok.hasPrefix("%") { continue } // comment
             if tok.hasPrefix("\\header") { continue }
@@ -75,14 +76,21 @@ public enum LilyParser {
                 }
                 // duration and suffixes from remaining string
                 let rest = String(tok[idx...])
-                let (dur, hasSlurStart, hasSlurEnd, arts) = parseDurSlurArt(from: rest)
+                let (dur, hasSlurStart, hasSlurEnd, hasTie, arts) = parseDurSlurArt(from: rest)
                 let octave = 3 + octaveDelta
                 let pitch = Pitch(step: step, alter: alter, octave: octave)
                 var ev = NotatedEvent(base: .note(pitch: pitch, duration: dur ?? Duration(1, 4)))
                 ev.slurStart = hasSlurStart
                 ev.slurEnd = hasSlurEnd
+                ev.tieStart = hasTie
                 ev.articulations = arts
                 if let dyn = pendingDynamic { ev.dynamic = dyn; pendingDynamic = nil }
+                if let pending = lastTiePending, pending.pitch == pitch {
+                    events[pending.idx].tieStart = true
+                    ev.tieEnd = true
+                    lastTiePending = nil
+                }
+                if hasTie { lastTiePending = (events.count, pitch) }
                 events.append(ev)
                 continue
             }
@@ -104,21 +112,25 @@ public enum LilyParser {
         return (dur, hasStart, hasEnd)
     }
 
-    private static func parseDurSlurArt(from s: String) -> (Duration?, Bool, Bool, [Articulation]) {
+    private static func parseDurSlurArt(from s: String) -> (Duration?, Bool, Bool, Bool, [Articulation]) {
         var i = s.startIndex
         var digits = ""
         while i < s.endIndex && s[i].isNumber { digits.append(s[i]); i = s.index(after: i) }
         let den = Int(digits)
         var hasStart = false
         var hasEnd = false
+        var hasTie = false
         var arts: [Articulation] = []
         let suffix = String(s[i...])
         if suffix.contains("(") { hasStart = true }
         if suffix.contains(")") { hasEnd = true }
         if suffix.contains("-.") { arts.append(.staccato) }
         if suffix.contains("->") { arts.append(.accent) }
+        if suffix.contains("-^") { arts.append(.marcato) }
+        if suffix.contains("-_") { arts.append(.tenuto) }
+        if suffix.contains("~") { hasTie = true }
         let dur = den != nil ? Duration(1, den!) : nil
-        return (dur, hasStart, hasEnd, arts)
+        return (dur, hasStart, hasEnd, hasTie, arts)
     }
 }
 

@@ -34,6 +34,7 @@ public enum LilyEmitter {
                 if let dyn = e.dynamic { prefix = "\\\(dyn.rawValue) " }
                 var token = prefix + "\(lp(pitch))\(ld(dur))"
                 for art in e.articulations { token += articulationSuffix(art) }
+                if e.tieStart { token += "~" }
                 if e.slurStart { token += "(" }
                 if e.slurEnd { token += ")" }
                 if let hp = e.hairpinStart { token += hairpinStart(hp) }
@@ -95,6 +96,8 @@ public enum LilyEmitter {
         switch a {
         case .staccato: return "-."
         case .accent: return "->"
+        case .marcato: return "-^"
+        case .tenuto: return "-_"
         }
     }
 

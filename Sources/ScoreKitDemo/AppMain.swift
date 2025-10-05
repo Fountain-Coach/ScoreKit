@@ -27,6 +27,7 @@ struct DemoView: View {
     @StateObject private var playhead = Playhead()
     @State private var bpm: Double = 120
     @State private var lastRange: Set<Int> = []
+    @State private var selectedDest: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -87,6 +88,21 @@ struct DemoView: View {
                     print("UMP64:", UMPDump.hexWords(all))
                 }
 #if canImport(CoreMIDI)
+                // Destination picker
+                if let sender = CoreMIDISender() {
+                    let count = sender.destinationCount()
+                    if count > 0 {
+                        Picker("Dest", selection: $selectedDest) {
+                            ForEach(0..<count, id: \.self) { idx in
+                                Text(sender.destinationName(at: idx) ?? "Dest #\(idx)").tag(idx)
+                            }
+                        }.frame(width: 240)
+                    } else {
+                        Text("No CoreMIDI destinations").foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("CoreMIDI unavailable").foregroundColor(.secondary)
+                }
                 Button("UMP → CoreMIDI (dest 0)") {
                     let engine = PlaybackEngine()
                     let sink = CollectingSink()
@@ -98,7 +114,7 @@ struct DemoView: View {
                         scheduled.append((it.time, words))
                     }
                     // Best-effort: send immediately ignoring schedule
-                    for (_, words) in scheduled { sender?.sendUMP(words: words, to: 0) }
+                    for (_, words) in scheduled { sender?.sendUMP(words: words, to: selectedDest) }
                 }
 #endif
             }

@@ -3,6 +3,8 @@ import Foundation
 public enum Articulation: Codable, Sendable, Equatable {
     case staccato
     case accent
+    case marcato
+    case tenuto
 }
 
 public enum Hairpin: Codable, Sendable, Equatable {
@@ -18,6 +20,8 @@ public struct NotatedEvent: Codable, Sendable {
     public var base: Event
     public var slurStart: Bool
     public var slurEnd: Bool
+    public var tieStart: Bool
+    public var tieEnd: Bool
     public var articulations: [Articulation]
     public var hairpinStart: Hairpin?
     public var hairpinEnd: Bool
@@ -29,10 +33,14 @@ public struct NotatedEvent: Codable, Sendable {
                 articulations: [Articulation] = [],
                 hairpinStart: Hairpin? = nil,
                 hairpinEnd: Bool = false,
+                tieStart: Bool = false,
+                tieEnd: Bool = false,
                 dynamic: DynamicLevel? = nil) {
         self.base = base
         self.slurStart = slurStart
         self.slurEnd = slurEnd
+        self.tieStart = tieStart
+        self.tieEnd = tieEnd
         self.articulations = articulations
         self.hairpinStart = hairpinStart
         self.hairpinEnd = hairpinEnd
@@ -91,6 +99,8 @@ private extension Articulation {
         switch self {
         case .staccato: return "staccato"
         case .accent: return "accent"
+        case .marcato: return "marcato"
+        case .tenuto: return "tenuto"
         }
     }
 }
