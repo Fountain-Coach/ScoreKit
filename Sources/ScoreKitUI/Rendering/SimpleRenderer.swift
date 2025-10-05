@@ -52,6 +52,7 @@ public struct SimpleRenderer: ScoreRenderable {
         let optionsBarIndices = Set(options.barIndices)
 
         var cursorX = origin.x
+        var yCache: [Pitch: CGFloat] = [:]
         for (i, e) in events.enumerated() {
             let x = cursorX
             if optionsBarIndices.contains(i) { barX.append(x) }
@@ -59,7 +60,12 @@ public struct SimpleRenderer: ScoreRenderable {
             let frame: CGRect
             switch e.base {
             case let .note(p, d):
-                y = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
+                if let cached = yCache[p] {
+                    y = cached
+                } else {
+                    let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
+                    yCache[p] = yy; y = yy
+                }
                 frame = CGRect(x: x - 5, y: y - 5, width: 10, height: 10)
                 elements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
             case .rest:

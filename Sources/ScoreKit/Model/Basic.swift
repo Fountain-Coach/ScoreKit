@@ -20,7 +20,7 @@ public struct Position: Equatable, Codable, Sendable {
 
 public enum Step: String, Codable, Sendable { case C, D, E, F, G, A, B }
 
-public struct Pitch: Equatable, Codable, Sendable {
+public struct Pitch: Equatable, Hashable, Codable, Sendable {
     public let step: Step
     public let alter: Int // -1 flat, 0 natural, +1 sharp (can be >1 for double)
     public let octave: Int
@@ -40,4 +40,3 @@ public enum Event: Codable, Sendable {
     case note(pitch: Pitch, duration: Duration)
     case rest(duration: Duration)
 }
-
