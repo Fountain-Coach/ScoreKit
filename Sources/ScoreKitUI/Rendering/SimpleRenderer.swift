@@ -154,7 +154,8 @@ public struct SimpleRenderer: ScoreRenderable {
         // Draw stems and basic flags for notes
         for el in tree.elements {
             guard case let .note(_, dur) = el.kind else { continue }
-            let stemUp = el.frame.midYVal < (options.padding.height + options.staffSpacing * 2) // below middle line -> stems up
+            // Stems up when the notehead is below the middle line (greater Y in screen coords)
+            let stemUp = el.frame.midYVal > (options.padding.height + options.staffSpacing * 2)
             let stemLength: CGFloat = 30
             let x = stemUp ? el.frame.maxX : el.frame.minX
             let y1 = el.frame.midYVal
@@ -234,7 +235,7 @@ public struct SimpleRenderer: ScoreRenderable {
             }
             if group.count >= 2 {
                 let yBase = tree.elements[group.first!].frame.midYVal
-                let stemUp = yBase < (options.padding.height + options.staffSpacing * 2)
+                let stemUp = yBase > (options.padding.height + options.staffSpacing * 2)
                 let y = stemUp ? (tree.elements[group.first!].frame.midYVal - 30) : (tree.elements[group.first!].frame.midYVal + 30)
                 ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
                 ctx.setLineWidth(3)
