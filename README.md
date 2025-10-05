@@ -32,8 +32,25 @@ Roadmap
   - Edits are snappy: the renderer only re‑lays out affected measures and shifts what follows, so most changes feel immediate.
   - A tiny playback path converts notes to MIDI 2.0 UMP messages so you can wire them to a device or print them for debugging; basic playhead following is included.
   - A LilyPond wrapper can emit `.ly` and, if LilyPond is installed, produce PDF/SVG for high‑quality output (tests default to a no‑exec mode).
-  - A small LilyPond import subset can read back simple snippets and round‑trip core markings.
+- A small LilyPond import subset can read back simple snippets and round‑trip core markings.
 - What this is not (yet): a full notation editor or DAW replacement. It’s a focused toolkit for coaching, annotation, playback hooks, and fast UI feedback.
+
+AudioTalk Preview (Core Flow)
+- ScoreKit previews what AI (AudioTalk/FountainAI) changes in your score.
+- The AI sends structured ops (slur, hairpin, articulation, dynamic). ScoreKit applies them and reflows just what’s needed.
+- Use `AudioTalkPreviewSession` to apply ops and get changed indices for highlighting and incremental layout. The demo includes a “Run AI Preview” action.
+
+Example
+```
+let session = AudioTalkPreviewSession(events: events)
+let ops: [PatchOp] = [
+  .hairpin(start: 0, end: events.count - 1, type: .crescendo),
+  .slur(start: 4, end: 7),
+  .dynamic(index: 0, level: .mp)
+]
+let (updated, changed) = session.apply(ops: ops)
+// Pass 'updated' to ScoreView; use 'changed' for updateLayout + highlight
+```
 
 Try It
 - Demo app (macOS): `cd ScoreKit && swift run ScoreKitDemo`

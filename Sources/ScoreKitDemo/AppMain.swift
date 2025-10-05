@@ -31,6 +31,7 @@ struct DemoView: View {
     @State private var selectedDest: Int = 0
     @State private var selectedEvent: NotatedEvent? = nil
     @State private var inspectorCancellable: AnyCancellable?
+    @State private var previewSession: AudioTalkPreviewSession? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -108,6 +109,20 @@ struct DemoView: View {
                         }
                     }
                     print("UMP64:", UMPDump.hexWords(all))
+                }
+                Button("Run AI Preview") {
+                    // Simulate AI ops: crescendo across scale + slur last 4 + set mp on first
+                    if previewSession == nil { previewSession = AudioTalkPreviewSession(events: events) }
+                    let ops: [PatchOp] = [
+                        .hairpin(start: 0, end: max(0, events.count - 1), type: .crescendo),
+                        .slur(start: max(0, events.count - 4), end: max(0, events.count - 1)),
+                        .dynamic(index: 0, level: .mp)
+                    ]
+                    if let session = previewSession {
+                        let (ev, changed) = session.apply(ops: ops)
+                        events = ev
+                        controller.flash(indices: changed, duration: 0.9)
+                    }
                 }
 #if canImport(CoreMIDI)
                 // Destination picker
