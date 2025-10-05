@@ -228,6 +228,13 @@ public struct SimpleRenderer: ScoreRenderable {
         return nil
     }
 
+    // Incremental update API (initially falls back to full layout).
+    public func updateLayout(previous: LayoutTree?, events: [NotatedEvent], in rect: CGRect, options: LayoutOptions, changed: Set<Int>) -> LayoutTree {
+        // Future: update only changed indices and reflow affected neighbors.
+        // For now, recompute full layout when anything changes.
+        return layout(events: events, in: rect, options: options)
+    }
+
     // MARK: - Helpers
     // Very rough treble clef mapping: E4 on bottom line; middle C (C4) one ledger below.
     private func trebleYOffset(for p: Pitch, staffSpacing: CGFloat, originY: CGFloat) -> CGFloat {

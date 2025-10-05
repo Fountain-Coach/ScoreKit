@@ -2,6 +2,7 @@ import SwiftUI
 import ScoreKit
 import ScoreKitUI
 import Foundation
+import Combine
 
 @main
 struct ScoreKitDemoApp: App {
@@ -28,6 +29,8 @@ struct DemoView: View {
     @State private var bpm: Double = 120
     @State private var lastRange: Set<Int> = []
     @State private var selectedDest: Int = 0
+    @State private var selectedEvent: NotatedEvent? = nil
+    @State private var inspectorCancellable: AnyCancellable?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,6 +39,25 @@ struct DemoView: View {
                 selected = sel
             }, onSelectRange: { set in
                 lastRange = set
+            })
+            SemanticsInspectorView(index: selected, event: selectedEvent, selectedRange: lastRange, onUpdateEvent: { idx, newEvent in
+                guard idx >= 0 && idx < events.count else { return }
+                var copy = events
+                copy[idx] = newEvent
+                events = copy
+            }, onApplyRangeHairpin: { range, type in
+                guard !events.isEmpty else { return }
+                var copy = events
+                let a = max(0, range.lowerBound); let b = min(copy.count - 1, range.upperBound)
+                if a < b {
+                    copy[a].hairpinStart = type
+                    copy[b].hairpinEnd = true
+                    events = copy
+                }
+            }, onSetRangeDynamic: { range, level in
+                var copy = events
+                for i in range { if i >= 0 && i < copy.count { copy[i].dynamic = level } }
+                events = copy
             })
             HStack {
                 // Playback controls
@@ -123,6 +145,9 @@ struct DemoView: View {
         .padding()
         .frame(minWidth: 640, minHeight: 360)
         .onAppear { buildStoryboard() }
+        .onReceive(Just(selected)) { newSel in
+            if let i = newSel, i >= 0 && i < events.count { selectedEvent = events[i] } else { selectedEvent = nil }
+        }
     }
 
     private func buildStoryboard() {
