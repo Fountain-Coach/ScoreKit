@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import ImageIO
+import CoreText
 import UniformTypeIdentifiers
 import ScoreKit
 import ScoreKitUI
@@ -26,6 +27,38 @@ func addFrame(_ image: CGImage, to dest: CGImageDestination, delay: Double) {
         ]
     ]
     CGImageDestinationAddImage(dest, image, props as CFDictionary)
+}
+
+func drawText(_ ctx: CGContext, rect: CGRect, text: String, at p: CGPoint, fontSize: CGFloat, color: CGColor, align: CTTextAlignment = .center) {
+    let font = CTFontCreateWithName("HelveticaNeue" as CFString, fontSize, nil)
+    let paragraph = withUnsafeBytes(of: {
+        var alignment = align
+        return alignment
+    }()) { raw -> CTParagraphStyle in
+        let settings = [CTParagraphStyleSetting(spec: .alignment, valueSize: MemoryLayout<CTTextAlignment>.size, value: raw.baseAddress!)]
+        return CTParagraphStyleCreate(settings, settings.count)
+    }
+    let attrs: [NSAttributedString.Key: Any] = [
+        .font: font,
+        .foregroundColor: color,
+        kCTParagraphStyleAttributeName as NSAttributedString.Key: paragraph
+    ]
+    let attr = NSAttributedString(string: text, attributes: attrs)
+    let line = CTLineCreateWithAttributedString(attr)
+    // Flip just for text drawing
+    ctx.saveGState()
+    ctx.translateBy(x: 0, y: rect.height)
+    ctx.scaleBy(x: 1, y: -1)
+    let yp = rect.height - p.y
+    // Adjust for alignment: we only handle center/left minimally using typographic bounds
+    var penX = p.x
+    if align == .center {
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        penX -= width / 2
+    }
+    ctx.textPosition = CGPoint(x: penX, y: yp)
+    CTLineDraw(line, ctx)
+    ctx.restoreGState()
 }
 
 // Prepare simple events
@@ -90,14 +123,42 @@ for frame in 0..<totalFrames {
     if frame < preHold {
         // Base state hold
         renderer.draw(baseTree, in: ctx, options: opts)
+        // Subtle measure numbers
+        if let firstBar = baseTree.barX.first {
+            drawText(ctx, rect: rect, text: "1", at: CGPoint(x: max(8, opts.padding.width - 20), y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+            drawText(ctx, rect: rect, text: "2", at: CGPoint(x: firstBar + 8, y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+        }
     } else if frame < preHold + transition {
         // Crossfade between base and after
         let t = Double(frame - preHold) / Double(max(1, transition - 1))
         ctx.saveGState(); ctx.setAlpha(CGFloat(1.0 - t)); renderer.draw(baseTree, in: ctx, options: opts); ctx.restoreGState()
         ctx.saveGState(); ctx.setAlpha(CGFloat(t)); renderer.draw(afterTree, in: ctx, options: opts); ctx.restoreGState()
+        // Measure numbers (constant)
+        if let firstBar = baseTree.barX.first {
+            drawText(ctx, rect: rect, text: "1", at: CGPoint(x: max(8, opts.padding.width - 20), y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+            drawText(ctx, rect: rect, text: "2", at: CGPoint(x: firstBar + 8, y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+        }
+        // Fade-in dynamic labels near hairpin baseline
+        if let firstEl = afterTree.elements.first, let lastEl = afterTree.elements.last {
+            let baseline = max(firstEl.frame.maxY, lastEl.frame.maxY) + 36
+            let alpha = CGFloat(t)
+            drawText(ctx, rect: rect, text: "p", at: CGPoint(x: firstEl.frame.midX, y: baseline), fontSize: 14, color: CGColor(gray: 0.1, alpha: alpha), align: .center)
+            drawText(ctx, rect: rect, text: "ff", at: CGPoint(x: lastEl.frame.midX, y: baseline), fontSize: 14, color: CGColor(gray: 0.1, alpha: alpha), align: .center)
+        }
     } else {
         // After state hold
         renderer.draw(afterTree, in: ctx, options: opts)
+        // Measure numbers (constant)
+        if let firstBar = afterTree.barX.first {
+            drawText(ctx, rect: rect, text: "1", at: CGPoint(x: max(8, opts.padding.width - 20), y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+            drawText(ctx, rect: rect, text: "2", at: CGPoint(x: firstBar + 8, y: opts.padding.height - 8), fontSize: 12, color: CGColor(gray: 0.35, alpha: 0.8), align: .left)
+        }
+        // p → ff labels near hairpin
+        if let firstEl = afterTree.elements.first, let lastEl = afterTree.elements.last {
+            let baseline = max(firstEl.frame.maxY, lastEl.frame.maxY) + 36
+            drawText(ctx, rect: rect, text: "p", at: CGPoint(x: firstEl.frame.midX, y: baseline), fontSize: 14, color: CGColor(gray: 0.1, alpha: 1.0), align: .center)
+            drawText(ctx, rect: rect, text: "ff", at: CGPoint(x: lastEl.frame.midX, y: baseline), fontSize: 14, color: CGColor(gray: 0.1, alpha: 1.0), align: .center)
+        }
     }
     if let img = ctx.makeImage() { addFrame(img, to: dest, delay: 0.36) }
 }
