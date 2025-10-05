@@ -1,6 +1,7 @@
 import SwiftUI
 import ScoreKit
 import ScoreKitUI
+import Foundation
 
 @main
 struct ScoreKitDemoApp: App {
@@ -21,6 +22,8 @@ struct DemoView: View {
     @State private var bars: [Int] = [3]
     @StateObject private var controller = ScoreController(highlighter: ScoreHighlighter())
     @State private var selected: Int? = nil
+    @StateObject private var player = StoryboardPlayer()
+    @State private var cues: [Cue] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -46,10 +49,30 @@ struct DemoView: View {
                     }
                 }
                 Button("Focus #2") { controller.focus(index: 2) }
+                Button(player.isPlaying ? "Stop Storyboard" : "Play Storyboard") {
+                    if player.isPlaying { player.stop() }
+                    else { buildStoryboard(); player.play(cues: cues, controller: controller) }
+                }
             }
             .buttonStyle(.borderedProminent)
         }
         .padding()
         .frame(minWidth: 640, minHeight: 360)
+        .onAppear { buildStoryboard() }
+    }
+
+    private func buildStoryboard() {
+        // Simple scripted sequence demonstrating cues
+        var seq: [Cue] = []
+        seq.append(.init(at: 0.0, action: .focus(0)))
+        seq.append(.init(at: 0.2, action: .flashIndices([0,1,2], 0.9)))
+        seq.append(.init(at: 1.2, action: .pulse([0,1,2], 2, 0.45)))
+        seq.append(.init(at: 2.0, action: .focus(2)))
+        seq.append(.init(at: 2.2, action: .flashRange(0...3, 0.8)))
+        seq.append(.init(at: 3.0, action: .focus(nil)))
+        // random last highlight
+        let r = Int.random(in: 0..<events.count)
+        seq.append(.init(at: 3.4, action: .flashIndices([r], 0.6)))
+        cues = seq
     }
 }
