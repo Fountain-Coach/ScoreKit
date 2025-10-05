@@ -8,6 +8,7 @@ public struct LayoutOptions: Sendable {
     public var noteSpacing: CGFloat = 24  // nominal horizontal advance per event
     public var padding: CGSize = .init(width: 20, height: 20)
     public var barIndices: [Int] = []
+    public var timeSignature: (beatsPerBar: Int, beatUnit: Int) = (4,4)
     public init() {}
 }
 
@@ -52,6 +53,9 @@ public struct SimpleRenderer: ScoreRenderable {
         let optionsBarIndices = Set(options.barIndices)
 
         var cursorX = origin.x
+        var beatsInBar: Int = 0
+        let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
+        let beatUnit = max(1, options.timeSignature.beatUnit)
         var yCache: [Pitch: CGFloat] = [:]
         for (i, e) in events.enumerated() {
             let x = cursorX
@@ -76,6 +80,13 @@ public struct SimpleRenderer: ScoreRenderable {
             // advance cursor based on duration
             cursorX += advance(for: e)
             width = max(width, cursorX + options.padding.width)
+            // insert computed barlines based on time signature
+            let eb = beats(for: e, beatUnit: beatUnit)
+            beatsInBar += eb
+            while beatsInBar >= beatsPerBar {
+                barX.append(cursorX)
+                beatsInBar -= beatsPerBar
+            }
             if e.slurStart {
                 if let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) {
                     slurs.append(LayoutSlur(startIndex: i, endIndex: end))
@@ -256,6 +267,17 @@ public struct SimpleRenderer: ScoreRenderable {
         case 32: return 3
         default: return 0
         }
+    }
+
+    private func beats(for e: NotatedEvent, beatUnit: Int) -> Int {
+        switch e.base {
+        case .note(_, let d): return beats(den: d.den, beatUnit: beatUnit)
+        case .rest(let d): return beats(den: d.den, beatUnit: beatUnit)
+        }
+    }
+    private func beats(den: Int, beatUnit: Int) -> Int {
+        // beats = (1/den) / (1/beatUnit) = beatUnit/den (integer approximation)
+        return max(1, beatUnit / max(1, den))
     }
 
     private func advance(for e: NotatedEvent) -> CGFloat {
