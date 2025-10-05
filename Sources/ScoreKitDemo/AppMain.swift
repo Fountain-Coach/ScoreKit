@@ -24,6 +24,8 @@ struct DemoView: View {
     @State private var selected: Int? = nil
     @StateObject private var player = StoryboardPlayer()
     @State private var cues: [Cue] = []
+    @StateObject private var playhead = Playhead()
+    @State private var bpm: Double = 120
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -32,6 +34,18 @@ struct DemoView: View {
                 selected = sel
             }
             HStack {
+                // Playback controls
+                Button(playhead.isPlaying ? "Stop Playhead" : "Start Playhead") {
+                    if playhead.isPlaying { playhead.stop() }
+                    else {
+                        let t = Tempo(bpm: bpm)
+                        playhead.start(events: events, tempo: t) { idx in
+                            controller.focus(index: idx)
+                        }
+                    }
+                }
+                Stepper("BPM: \(Int(bpm))", value: $bpm, in: 40...220, step: 5)
+                Divider()
                 Button("Flash bars 1–2") {
                     let idx: Set<Int> = [0,1,2]
                     controller.flash(indices: idx, duration: 0.8)
