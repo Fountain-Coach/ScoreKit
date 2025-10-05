@@ -21,6 +21,7 @@ Getting Started
 
 Roadmap
 - See `AGENTS.md` for architecture, milestones (M0–M8), and conventions
+ - See `STATUS-AUDIT.md` for the current audit, prioritized gaps, and hook‑in plan
 
 **In Plain English**
 - Think of ScoreKit as two things working together:
