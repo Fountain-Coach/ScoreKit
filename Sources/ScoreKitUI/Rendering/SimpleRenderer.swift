@@ -274,74 +274,193 @@ public struct SimpleRenderer: ScoreRenderable {
         return nil
     }
 
-    // Incremental update API (initially falls back to full layout).
+    // Incremental update API with tighter partial reflow (per-measure window).
+    // Reflows only the affected measure range and shifts subsequent content.
     public func updateLayout(previous: LayoutTree?, events: [NotatedEvent], in rect: CGRect, options: LayoutOptions, changed: Set<Int>) -> LayoutTree {
-        guard let prev = previous, let start = changed.min(), start > 0, start < events.count else {
+        guard let prev = previous, !changed.isEmpty else {
             return layout(events: events, in: rect, options: options)
         }
-        let staffHeight = options.staffSpacing * 4
-        var width = max(rect.width, prev.size.width)
-        let height = max(rect.height, prev.size.height)
-        var elements = Array(prev.elements.prefix(start))
-        var slurs: [LayoutSlur] = []
-        var hairpins: [LayoutHairpin] = []
-        var barX = prev.barX.filter { $0 <= prev.elements[max(0,start-1)].frame.midXVal }
-        var beatPos = Array(prev.beatPos.prefix(start))
-
-        let origin = CGPoint(x: options.padding.width, y: options.padding.height)
-        var yCache: [Pitch: CGFloat] = [:]
-        // starting cursor X at previous position of the first changed element
-        var cursorX = prev.elements[start].frame.midXVal
-        // recover the beat accumulator position using prev.beatPos of previous element
+        // Determine window to reflow: from start of first affected measure to end of last affected measure.
         let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
         let beatUnit = max(1, options.timeSignature.beatUnit)
-        var beatsInBar = 0
-        if start > 0 {
-            let prevPos = prev.beatPos[start-1]
-            // approximate running beats as floor(prevPos)
-            beatsInBar = Int(floor(prevPos))
+        // No prev beat map? Fallback
+        guard prev.elements.count == events.count, prev.beatPos.count == events.count else {
+            return layout(events: events, in: rect, options: options)
+        }
+        var firstChanged = max(0, changed.min()!)
+        var lastChanged = min(events.count - 1, changed.max()!)
+
+        // Layer-in neighbor-span expansion: include entire slurs/hairpins and beam groups that intersect the change set.
+        // Use previous layout's spans/groups as a conservative window-expansion guide.
+        if !prev.slurs.isEmpty {
+            for s in prev.slurs {
+                if s.startIndex <= lastChanged && s.endIndex >= firstChanged {
+                    firstChanged = min(firstChanged, s.startIndex)
+                    lastChanged = max(lastChanged, s.endIndex)
+                }
+            }
+        }
+        if !prev.hairpins.isEmpty {
+            for h in prev.hairpins {
+                if h.startIndex <= lastChanged && h.endIndex >= firstChanged {
+                    firstChanged = min(firstChanged, h.startIndex)
+                    lastChanged = max(lastChanged, h.endIndex)
+                }
+            }
+        }
+        if !prev.beamGroups.isEmpty {
+            for g in prev.beamGroups {
+                if g.isEmpty { continue }
+                // Quick overlap test using range of group
+                let gMin = g.first!
+                let gMax = g.last!
+                if gMin <= lastChanged && gMax >= firstChanged {
+                    firstChanged = min(firstChanged, gMin)
+                    lastChanged = max(lastChanged, gMax)
+                }
+            }
         }
 
-        for i in start..<events.count {
+        func findMeasureStart(from index: Int) -> Int {
+            if index <= 0 { return 0 }
+            var i = index - 1
+            while i >= 0 {
+                if abs(prev.beatPos[i]) < 1e-9 { return i + 1 }
+                i -= 1
+            }
+            return 0
+        }
+        func findMeasureEndInclusive(from index: Int) -> Int {
+            var i = index
+            while i < prev.beatPos.count {
+                if abs(prev.beatPos[i]) < 1e-9 { return i }
+                i += 1
+            }
+            return events.count - 1
+        }
+
+        let reflowStart = findMeasureStart(from: firstChanged)
+        let reflowEnd = findMeasureEndInclusive(from: lastChanged)
+
+        // Build prefix (unchanged section before reflowStart)
+        var newElements: [LayoutElement] = []
+        if reflowStart > 0 { newElements.append(contentsOf: prev.elements[0..<reflowStart]) }
+
+        // Prepare caches & state
+        let origin = CGPoint(x: options.padding.width, y: options.padding.height)
+        let staffHeight = options.staffSpacing * 4
+        var yCache: [Pitch: CGFloat] = [:]
+        // Start cursor at previous X of the first element in the reflow start
+        var cursorX = prev.elements[reflowStart].frame.midXVal
+        let prevStartX = cursorX
+
+        // Beat tracking resets at measure start
+        var localBeatPos: [Double] = []
+        var localBarX: [CGFloat] = []
+        var beatsInBar = 0
+
+        // Recompute elements for [reflowStart ... reflowEnd]
+        for i in reflowStart...reflowEnd {
             let e = events[i]
             let y: CGFloat
             let frame: CGRect
             switch e.base {
             case let .note(p, d):
-                if let cached = yCache[p] {
-                    y = cached
-                } else {
-                    let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
-                    yCache[p] = yy; y = yy
-                }
+                if let cached = yCache[p] { y = cached }
+                else { let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y); yCache[p] = yy; y = yy }
                 frame = CGRect(x: cursorX - 5, y: y - 5, width: 10, height: 10)
-                elements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
-            case .rest:
+                newElements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
+            case .rest(_):
                 y = origin.y + staffHeight/2 - 3
                 frame = CGRect(x: cursorX - 4, y: y - 4, width: 8, height: 8)
-                elements.append(LayoutElement(index: i, kind: .rest, frame: frame))
+                newElements.append(LayoutElement(index: i, kind: .rest, frame: frame))
             }
+            // advance and compute local beat pos/barX for the changed window
             cursorX += advance(for: e)
-            width = max(width, cursorX + options.padding.width)
-            // beats
             let frac = beatFraction(for: e, beatUnit: beatUnit)
-            let lastPos = (beatPos.last ?? 0)
+            let lastPos = (localBeatPos.last ?? 0)
             let newPos = (lastPos + frac).truncatingRemainder(dividingBy: Double(beatsPerBar))
-            beatPos.append(newPos)
+            localBeatPos.append(newPos)
             let eb = beats(for: e, beatUnit: beatUnit)
             beatsInBar += eb
             while beatsInBar >= beatsPerBar {
-                barX.append(cursorX)
+                localBarX.append(cursorX)
                 beatsInBar -= beatsPerBar
             }
         }
-        // Recompute slurs/hairpins globally for simplicity
+        let newEndNextX = cursorX // X at end of last reflowed event (start of following element)
+
+        // Compute previous end-next-X for delta calculation
+        let prevEndNextX: CGFloat = {
+            if reflowEnd + 1 < prev.elements.count { return prev.elements[reflowEnd + 1].frame.midXVal }
+            // else derive by advancing last element once
+            let lastEl = prev.elements[reflowEnd]
+            switch events[reflowEnd].base {
+            case .note(_, let d):
+                let adv = advance(for: .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: d)))
+                return lastEl.frame.midXVal + adv
+            case .rest(let d):
+                let adv = advance(for: .init(base: .rest(duration: d)))
+                return lastEl.frame.midXVal + adv
+            }
+        }()
+
+        let deltaX = newEndNextX - prevEndNextX
+
+        // Append shifted suffix
+        if reflowEnd + 1 < prev.elements.count {
+            for el in prev.elements[(reflowEnd+1)..<prev.elements.count] {
+                let f = el.frame
+                let shifted = CGRect(x: f.origin.x + deltaX, y: f.origin.y, width: f.size.width, height: f.size.height)
+                newElements.append(LayoutElement(index: el.index, kind: el.kind, frame: shifted))
+            }
+        }
+
+        // Rebuild beatPos array: prefix (unchanged until reflowStart-1), local (changed window), suffix (unchanged after reflowEnd)
+        var newBeatPos: [Double] = []
+        if reflowStart > 0 { newBeatPos.append(contentsOf: prev.beatPos[0..<reflowStart]) }
+        newBeatPos.append(contentsOf: localBeatPos)
+        if reflowEnd + 1 < prev.beatPos.count { newBeatPos.append(contentsOf: prev.beatPos[(reflowEnd+1)..<prev.beatPos.count]) }
+
+        // Rebuild barX: prefix (<= start bar), local (bars in changed range), suffix (shifted by delta)
+        var newBarX: [CGFloat] = []
+        // include bars up to and including the barline at the start of reflow (if present)
+        let eps: CGFloat = 1e-6
+        newBarX.append(contentsOf: prev.barX.filter { $0 <= (prevStartX + eps) })
+        // include local bars computed with the new cursor
+        newBarX.append(contentsOf: localBarX)
+        // shift subsequent bars strictly after previous end-next-X
+        let suffixBars = prev.barX.filter { $0 > (prevEndNextX + eps) }.map { $0 + deltaX }
+        newBarX.append(contentsOf: suffixBars)
+
+        // Slurs/hairpins: recompute globally (cheap) for correctness across boundaries
+        var slurs: [LayoutSlur] = []
+        var hairpins: [LayoutHairpin] = []
         for i in 0..<events.count {
             if events[i].slurStart, let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) { slurs.append(LayoutSlur(startIndex: i, endIndex: end)) }
             if let hp = events[i].hairpinStart, let end = events[(i+1)...].firstIndex(where: { $0.hairpinEnd }) { hairpins.append(LayoutHairpin(startIndex: i, endIndex: end, crescendo: hp == .crescendo)) }
         }
-        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos)
-        return LayoutTree(size: CGSize(width: width, height: height), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
+
+        // Compute size width by tracking final next-X
+        let prevLastIdx = events.count - 1
+        let prevLastNextX: CGFloat = {
+            if prevLastIdx + 1 < prev.elements.count { return prev.elements[prevLastIdx + 1].frame.midXVal }
+            // else derive from last element in prev
+            let lastEl = prev.elements[prevLastIdx]
+            switch events[prevLastIdx].base {
+            case .note(_, let d):
+                return lastEl.frame.midXVal + advance(for: .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: d)))
+            case .rest(let d):
+                return lastEl.frame.midXVal + advance(for: .init(base: .rest(duration: d)))
+            }
+        }()
+        let newLastNextX: CGFloat = (reflowEnd < prevLastIdx) ? (prevLastNextX + deltaX) : newEndNextX
+        let newWidth = max(rect.width, newLastNextX + options.padding.width)
+        let newHeight = max(rect.height, prev.size.height)
+
+        // Beam groups/levels recomputed globally (fast enough N)
+        let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos)
+        return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     // MARK: - Helpers
