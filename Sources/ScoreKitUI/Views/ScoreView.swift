@@ -31,7 +31,7 @@ public struct ScoreView: View {
                 var opts = LayoutOptions()
                 opts.barIndices = barIndices
                 let rect = CGRect(origin: .zero, size: size)
-                let tree = renderer.layout(events: events, in: rect, options: opts)
+                let tree = layoutTree(in: rect, options: opts)
                 ctx.withCGContext { cg in
                     renderer.draw(tree, in: cg, options: opts)
                     // Selection highlight
@@ -50,6 +50,14 @@ public struct ScoreView: View {
                                 let f = tree.elements[idx].frame.insetBy(dx: -10, dy: -10)
                                 cg.fill(f)
                             }
+                        }
+                    }
+                    // Range highlight fill
+                    if !selectedRange.isEmpty {
+                        cg.setFillColor(CGColor(red: 0.1, green: 0.5, blue: 1.0, alpha: 0.12))
+                        for idx in selectedRange.sorted() where idx >= 0 && idx < tree.elements.count {
+                            let f = tree.elements[idx].frame.insetBy(dx: -6, dy: -6)
+                            cg.fill(f)
                         }
                     }
                     // Range handles
@@ -86,12 +94,20 @@ public struct ScoreView: View {
             #if os(macOS)
             .onHover { h in isHovering = h }
             #endif
+            // Long-press shows tooltip near current selection on iOS
+            #if os(iOS)
+            .onLongPressGesture(minimumDuration: 0.4) {
+                if selected == nil { return }
+                isHovering = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { isHovering = false }
+            }
+            #endif
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         var opts = LayoutOptions(); opts.barIndices = barIndices
                         let rect = CGRect(origin: .zero, size: proxy.size)
-                        let tree = renderer.layout(events: events, in: rect, options: opts)
+                        let tree = layoutTree(in: rect, options: opts)
                         if resizeMode == nil, selectedRange.count >= 2 {
                             let sorted = selectedRange.sorted(); let a = sorted.first!; let b = sorted.last!
                             let left = tree.elements[a].frame
@@ -116,7 +132,7 @@ public struct ScoreView: View {
                     .onEnded { value in
                         var opts = LayoutOptions(); opts.barIndices = barIndices
                         let rect = CGRect(origin: .zero, size: proxy.size)
-                        let tree = renderer.layout(events: events, in: rect, options: opts)
+                        let tree = layoutTree(in: rect, options: opts)
                         if let _ = resizeMode {
                             onSelectRange?(selectedRange)
                         } else if let drag = dragRect, drag.width > 3 && drag.height > 3 {
@@ -139,6 +155,36 @@ public struct ScoreView: View {
         .frame(minHeight: 160)
         .background(Color(nsColor: .textBackgroundColor))
         .padding()
+    }
+
+    // Simple layout cache keyed by size, bar indices, and event content
+    @State private var cachedTree: LayoutTree? = nil
+    @State private var cachedKey: String = ""
+
+    private func layoutTree(in rect: CGRect, options: LayoutOptions) -> LayoutTree {
+        let key = layoutKey(size: rect.size, options: options)
+        if key == cachedKey, let t = cachedTree { return t }
+        let t = renderer.layout(events: events, in: rect, options: options)
+        cachedKey = key; cachedTree = t
+        return t
+    }
+
+    private func layoutKey(size: CGSize, options: LayoutOptions) -> String {
+        var hasher = Hasher()
+        hasher.combine(Int(size.width)); hasher.combine(Int(size.height))
+        hasher.combine(options.barIndices.count)
+        for i in options.barIndices { hasher.combine(i) }
+        hasher.combine(events.count)
+        for e in events {
+            switch e.base {
+            case .note(let p, let d): hasher.combine(1); hasher.combine(p.step.rawValue); hasher.combine(p.alter); hasher.combine(p.octave); hasher.combine(d.den)
+            case .rest(let d): hasher.combine(0); hasher.combine(d.den)
+            }
+            hasher.combine(e.slurStart); hasher.combine(e.slurEnd); hasher.combine(e.tieStart); hasher.combine(e.tieEnd)
+            hasher.combine(e.articulations.count)
+            if let dyn = e.dynamic { hasher.combine(dyn.rawValue) }
+        }
+        return String(hasher.finalize())
     }
 
     private func nearestIndex(atX x: CGFloat, in tree: LayoutTree) -> Int? {
