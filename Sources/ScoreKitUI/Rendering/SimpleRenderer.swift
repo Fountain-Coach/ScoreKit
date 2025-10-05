@@ -154,10 +154,14 @@ public struct SimpleRenderer: ScoreRenderable {
         // Draw stems and basic flags for notes
         for el in tree.elements {
             guard case let .note(_, dur) = el.kind else { continue }
-            // Stems up when the notehead is below the middle line (greater Y in screen coords)
-            let stemUp = el.frame.midYVal > (options.padding.height + options.staffSpacing * 2)
-            let stemLength: CGFloat = 30
-            let x = stemUp ? el.frame.maxX : el.frame.minX
+            // Stems up when notehead is below middle line (greater Y in screen coords).
+            // Enforce "middle line stems down" by using strict > for up, equality/down -> down.
+            let middleY = (options.padding.height + options.staffSpacing * 2)
+            let stemUp = el.frame.midYVal > middleY
+            // Standard stem length ≈ 3.5 staff spaces for single notes
+            let stemLength: CGFloat = options.staffSpacing * 3.5
+            // Attach on right for up-stems, left for down-stems (more font-like slight offset)
+            let x = stemUp ? (el.frame.maxX + 0.5) : (el.frame.minX - 0.5)
             let y1 = el.frame.midYVal
             let y2 = stemUp ? (y1 - stemLength) : (y1 + stemLength)
             ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
