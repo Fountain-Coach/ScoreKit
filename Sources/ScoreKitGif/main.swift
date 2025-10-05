@@ -46,7 +46,7 @@ func makeEvents(kind: DemoKind) -> [NotatedEvent] {
 
 let renderer = SimpleRenderer()
 var opts = LayoutOptions(); opts.timeSignature = (4,4)
-let size = CGSize(width: 640, height: 200)
+let size = CGSize(width: 720, height: 220)
 let rect = CGRect(origin: .zero, size: size)
 
 // Output path
@@ -54,52 +54,46 @@ let docsDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).app
 try? FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
 let outURL = docsDir.appendingPathComponent("scorekit-demo.gif")
 
-guard let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.gif.identifier as CFString, 30, nil) else {
+let totalFrames = 30
+guard let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
     fatalError("Could not create GIF destination")
 }
 let gifProps: [CFString: Any] = [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]]
 CGImageDestinationSetProperties(dest, gifProps as CFDictionary)
 
-// Build frames: first 10 frames baseline, then switch to widened duration at index 5 and use updateLayout
-var prevTree: LayoutTree? = nil
-var baseEvents = makeEvents(kind: .base)
+// Precompute trees to avoid per-frame relayout flicker
+let baseEvents = makeEvents(kind: .base)
+let baseTree = renderer.layout(events: baseEvents, in: rect, options: opts)
+var widenedEvents = baseEvents
+let changedIndex = 5
+widenedEvents[changedIndex] = .init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: Duration(1,2)))
+let afterTree = renderer.updateLayout(previous: baseTree, events: widenedEvents, in: rect, options: opts, changed: [changedIndex])
 
-for frame in 0..<30 {
+let preFrames = 12
+for frame in 0..<totalFrames {
     let ctx = makeContext(size: size)
     // white background
     ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
     ctx.fill(rect)
-    let tree: LayoutTree
-    if frame < 10 {
-        tree = renderer.layout(events: baseEvents, in: rect, options: opts)
-    } else {
-        let widened = makeEvents(kind: .widened)
-        let changed: Set<Int> = [5]
-        tree = renderer.updateLayout(previous: prevTree, events: widened, in: rect, options: opts, changed: changed)
-        baseEvents = widened
-    }
-    ctx.saveGState()
+    let tree = (frame < preFrames) ? baseTree : afterTree
     renderer.draw(tree, in: ctx, options: opts)
-    ctx.restoreGState()
-    // selection highlight moves across elements
-    let sel = frame % max(1, tree.elements.count)
-    if sel < tree.elements.count {
-        let f = tree.elements[sel].frame.insetBy(dx: -6, dy: -6)
-        ctx.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 0.18))
+    // subtle pulse highlight on changed note
+    if changedIndex < tree.elements.count {
+        let f = tree.elements[changedIndex].frame.insetBy(dx: -8, dy: -8)
+        let t = Double(frame) / Double(max(1,totalFrames-1))
+        let alpha = 0.16 + 0.10 * 0.5 * (1.0 + sin(2 * Double.pi * t))
+        ctx.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: alpha))
         ctx.fill(f)
-        ctx.setStrokeColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 0.8))
+        ctx.setStrokeColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: min(0.85, alpha + 0.25)))
         ctx.setLineWidth(2)
         ctx.stroke(f)
     }
-    // Make image and append
     if let img = ctx.makeImage() {
-        addFrame(img, to: dest, delay: 0.08)
+        addFrame(img, to: dest, delay: 0.14)
     }
-    prevTree = tree
 }
 
 if !CGImageDestinationFinalize(dest) {
     fatalError("Failed to write GIF to \(outURL.path)")
 }
 print("Wrote \(outURL.path)")
-
