@@ -6,11 +6,13 @@ public final class ScoreHighlighter: ObservableObject {
     @Published public private(set) var indices: Set<Int> = []
     @Published public private(set) var opacity: Double = 0.0
     private var timer: Timer?
+    private var pulseTimer: Timer?
 
     public init() {}
 
     public func clear() {
         timer?.invalidate(); timer = nil
+        pulseTimer?.invalidate(); pulseTimer = nil
         indices = []
         opacity = 0.0
     }
@@ -37,5 +39,27 @@ public final class ScoreHighlighter: ObservableObject {
             }
         }
         RunLoop.main.add(timer!, forMode: .common)
+    }
+
+    public func flash(range: ClosedRange<Int>, duration: TimeInterval = 0.8) {
+        let set = Set(range.lowerBound...range.upperBound)
+        flash(indices: set, duration: duration)
+    }
+
+    public func pulse(indices: Set<Int>, cycles: Int = 2, period: TimeInterval = 0.6) {
+        guard cycles > 0 else { return }
+        pulseTimer?.invalidate(); pulseTimer = nil
+        var remaining = cycles
+        pulseTimer = Timer.scheduledTimer(withTimeInterval: period, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            remaining -= 1
+            Task { @MainActor in
+                self.flash(indices: indices, duration: min(0.8, period * 0.8))
+            }
+            if remaining <= 0 { t.invalidate() }
+        }
+        if let pt = pulseTimer { RunLoop.main.add(pt, forMode: .common) }
+        // immediate first flash
+        flash(indices: indices, duration: min(0.8, period * 0.8))
     }
 }
