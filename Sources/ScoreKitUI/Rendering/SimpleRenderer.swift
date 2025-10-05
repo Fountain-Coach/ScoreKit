@@ -276,9 +276,72 @@ public struct SimpleRenderer: ScoreRenderable {
 
     // Incremental update API (initially falls back to full layout).
     public func updateLayout(previous: LayoutTree?, events: [NotatedEvent], in rect: CGRect, options: LayoutOptions, changed: Set<Int>) -> LayoutTree {
-        // Future: update only changed indices and reflow affected neighbors.
-        // For now, recompute full layout when anything changes.
-        return layout(events: events, in: rect, options: options)
+        guard let prev = previous, let start = changed.min(), start > 0, start < events.count else {
+            return layout(events: events, in: rect, options: options)
+        }
+        let staffHeight = options.staffSpacing * 4
+        var width = max(rect.width, prev.size.width)
+        let height = max(rect.height, prev.size.height)
+        var elements = Array(prev.elements.prefix(start))
+        var slurs: [LayoutSlur] = []
+        var hairpins: [LayoutHairpin] = []
+        var barX = prev.barX.filter { $0 <= prev.elements[max(0,start-1)].frame.midXVal }
+        var beatPos = Array(prev.beatPos.prefix(start))
+
+        let origin = CGPoint(x: options.padding.width, y: options.padding.height)
+        var yCache: [Pitch: CGFloat] = [:]
+        // starting cursor X at previous position of the first changed element
+        var cursorX = prev.elements[start].frame.midXVal
+        // recover the beat accumulator position using prev.beatPos of previous element
+        let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
+        let beatUnit = max(1, options.timeSignature.beatUnit)
+        var beatsInBar = 0
+        if start > 0 {
+            let prevPos = prev.beatPos[start-1]
+            // approximate running beats as floor(prevPos)
+            beatsInBar = Int(floor(prevPos))
+        }
+
+        for i in start..<events.count {
+            let e = events[i]
+            let y: CGFloat
+            let frame: CGRect
+            switch e.base {
+            case let .note(p, d):
+                if let cached = yCache[p] {
+                    y = cached
+                } else {
+                    let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
+                    yCache[p] = yy; y = yy
+                }
+                frame = CGRect(x: cursorX - 5, y: y - 5, width: 10, height: 10)
+                elements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
+            case .rest:
+                y = origin.y + staffHeight/2 - 3
+                frame = CGRect(x: cursorX - 4, y: y - 4, width: 8, height: 8)
+                elements.append(LayoutElement(index: i, kind: .rest, frame: frame))
+            }
+            cursorX += advance(for: e)
+            width = max(width, cursorX + options.padding.width)
+            // beats
+            let frac = beatFraction(for: e, beatUnit: beatUnit)
+            let lastPos = (beatPos.last ?? 0)
+            let newPos = (lastPos + frac).truncatingRemainder(dividingBy: Double(beatsPerBar))
+            beatPos.append(newPos)
+            let eb = beats(for: e, beatUnit: beatUnit)
+            beatsInBar += eb
+            while beatsInBar >= beatsPerBar {
+                barX.append(cursorX)
+                beatsInBar -= beatsPerBar
+            }
+        }
+        // Recompute slurs/hairpins globally for simplicity
+        for i in 0..<events.count {
+            if events[i].slurStart, let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) { slurs.append(LayoutSlur(startIndex: i, endIndex: end)) }
+            if let hp = events[i].hairpinStart, let end = events[(i+1)...].firstIndex(where: { $0.hairpinEnd }) { hairpins.append(LayoutHairpin(startIndex: i, endIndex: end, crescendo: hp == .crescendo)) }
+        }
+        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos)
+        return LayoutTree(size: CGSize(width: width, height: height), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     // MARK: - Helpers
