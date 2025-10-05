@@ -240,6 +240,25 @@ public struct SimpleRenderer: ScoreRenderable {
                 ctx.move(to: CGPoint(x: xStart, y: y))
                 ctx.addLine(to: CGPoint(x: xEnd, y: y))
                 ctx.strokePath()
+                // second/third beams between adjacent notes depending on duration levels
+                for k in 0..<(group.count - 1) {
+                    let a = group[k]; let b = group[k+1]
+                    let level = min(beamLevelFor(tree.elements[a]), beamLevelFor(tree.elements[b]))
+                    if level >= 2 {
+                        let y2 = stemUp ? y - 4 : y + 4
+                        ctx.setLineWidth(2)
+                        ctx.move(to: CGPoint(x: tree.elements[a].frame.midXVal, y: y2))
+                        ctx.addLine(to: CGPoint(x: tree.elements[b].frame.midXVal, y: y2))
+                        ctx.strokePath()
+                    }
+                    if level >= 3 {
+                        let y3 = stemUp ? y - 8 : y + 8
+                        ctx.setLineWidth(2)
+                        ctx.move(to: CGPoint(x: tree.elements[a].frame.midXVal, y: y3))
+                        ctx.addLine(to: CGPoint(x: tree.elements[b].frame.midXVal, y: y3))
+                        ctx.strokePath()
+                    }
+                }
             }
             i = j
         }
@@ -297,6 +316,15 @@ public struct SimpleRenderer: ScoreRenderable {
         switch e.base {
         case .note(_, let d): return Double(beatUnit) / Double(max(1, d.den))
         case .rest(let d): return Double(beatUnit) / Double(max(1, d.den))
+        }
+    }
+
+    private func beamLevelFor(_ el: LayoutElement) -> Int {
+        switch el.kind {
+        case .note(_, let d):
+            switch d.den { case 8: return 1; case 16: return 2; case 32: return 3; default: return 0 }
+        case .rest:
+            return 0
         }
     }
 
