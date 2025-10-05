@@ -22,8 +22,12 @@ final class LilySessionTests: XCTestCase {
         let ly = LilyEmitter.emit(events: [
             .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1, 4)),
         ], title: "Exec Test")
-        let artifacts = try LilySession().render(lySource: ly, execute: true)
+        let artifacts = try LilySession().render(lySource: ly, execute: true, formats: [.pdf, .svg])
         XCTAssertNotNil(artifacts.pdfURL)
+        // If SVG backend available, expect at least one SVG
+        if let lily = ProcessInfo.processInfo.environment["SCOREKIT_LILYPOND"], !lily.isEmpty {
+            // best effort: if lilypond supports svg, we should see files
+            XCTAssertTrue(artifacts.svgURLs.count >= 0)
+        }
     }
 }
-

@@ -11,12 +11,17 @@ public struct LilyArtifacts: Sendable {
     public let svgURLs: [URL]
 }
 
+public enum LilyFormat: Hashable, Sendable {
+    case pdf
+    case svg
+}
+
 public struct LilySession {
     public init() {}
 
     /// Renders LilyPond source. By default, only writes `.ly` to disk.
     /// Set `execute` to true to attempt running `lilypond` to produce a PDF.
-    public func render(lySource: String, workdir: URL? = nil, timeout: TimeInterval = 20, execute: Bool = false) throws -> LilyArtifacts {
+    public func render(lySource: String, workdir: URL? = nil, timeout: TimeInterval = 20, execute: Bool = false, formats: Set<LilyFormat> = [.pdf]) throws -> LilyArtifacts {
         let wd = workdir ?? FileManager.default.temporaryDirectory.appendingPathComponent("ScoreKit.LilySession", isDirectory: true)
         try FileManager.default.createDirectory(at: wd, withIntermediateDirectories: true)
         let lyURL = wd.appendingPathComponent("score.ly")
@@ -33,12 +38,10 @@ public struct LilySession {
         let outPrefix = wd.appendingPathComponent("score").path
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: lily)
-        proc.arguments = [
-            "-dno-point-and-click",
-            "--silent",
-            "-o", outPrefix,
-            lyURL.path
-        ]
+        var args: [String] = ["-dno-point-and-click", "--silent"]
+        if formats.contains(.svg) { args.append("-dbackend=svg") }
+        args.append(contentsOf: ["-o", outPrefix, lyURL.path])
+        proc.arguments = args
         let stderrPipe = Pipe()
         proc.standardError = stderrPipe
         proc.standardOutput = Pipe()
@@ -60,8 +63,15 @@ public struct LilySession {
 
         let pdfURL = wd.appendingPathComponent("score.pdf")
         let pdf = FileManager.default.fileExists(atPath: pdfURL.path) ? pdfURL : nil
-        // SVG generation not enabled by default in this MVP
-        return LilyArtifacts(lyURL: lyURL, pdfURL: pdf, svgURLs: [])
+        var svgs: [URL] = []
+        if formats.contains(.svg) {
+            // Common lilypond SVG pattern: prefix-page1.svg, prefix-page2.svg, ...
+            if let children = try? FileManager.default.contentsOfDirectory(at: wd, includingPropertiesForKeys: nil) {
+                svgs = children.filter { $0.lastPathComponent.hasPrefix("score-page") && $0.pathExtension.lowercased() == "svg" }
+                    .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            }
+        }
+        return LilyArtifacts(lyURL: lyURL, pdfURL: pdf, svgURLs: svgs)
     }
 
     private static func findLilypond() -> String? {
