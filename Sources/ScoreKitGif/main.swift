@@ -45,8 +45,8 @@ func makeEvents(kind: DemoKind) -> [NotatedEvent] {
 }
 
 let renderer = SimpleRenderer()
-var opts = LayoutOptions(); opts.timeSignature = (4,4)
-let size = CGSize(width: 720, height: 220)
+var opts = LayoutOptions(); opts.timeSignature = (4,4); opts.padding = CGSize(width: 40, height: 28)
+let size = CGSize(width: 1024, height: 260)
 let rect = CGRect(origin: .zero, size: size)
 
 // Output path
@@ -54,7 +54,10 @@ let docsDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).app
 try? FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
 let outURL = docsDir.appendingPathComponent("scorekit-demo.gif")
 
-let totalFrames = 30
+let preHold = 8
+let transition = 6
+let postHold = 10
+let totalFrames = preHold + transition + postHold
 guard let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.gif.identifier as CFString, totalFrames, nil) else {
     fatalError("Could not create GIF destination")
 }
@@ -69,28 +72,34 @@ let changedIndex = 5
 widenedEvents[changedIndex] = .init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: Duration(1,2)))
 let afterTree = renderer.updateLayout(previous: baseTree, events: widenedEvents, in: rect, options: opts, changed: [changedIndex])
 
-let preFrames = 12
 for frame in 0..<totalFrames {
     let ctx = makeContext(size: size)
     // white background
     ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
     ctx.fill(rect)
-    let tree = (frame < preFrames) ? baseTree : afterTree
-    renderer.draw(tree, in: ctx, options: opts)
-    // subtle pulse highlight on changed note
-    if changedIndex < tree.elements.count {
-        let f = tree.elements[changedIndex].frame.insetBy(dx: -8, dy: -8)
-        let t = Double(frame) / Double(max(1,totalFrames-1))
-        let alpha = 0.16 + 0.10 * 0.5 * (1.0 + sin(2 * Double.pi * t))
-        ctx.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: alpha))
-        ctx.fill(f)
-        ctx.setStrokeColor(CGColor(red: 0.2, green: 0.6, blue: 1.0, alpha: min(0.85, alpha + 0.25)))
-        ctx.setLineWidth(2)
-        ctx.stroke(f)
+    if frame < preHold {
+        // Base state hold
+        renderer.draw(baseTree, in: ctx, options: opts)
+    } else if frame < preHold + transition {
+        // Crossfade between base and after
+        let t = Double(frame - preHold) / Double(max(1, transition - 1))
+        ctx.saveGState(); ctx.setAlpha(CGFloat(1.0 - t)); renderer.draw(baseTree, in: ctx, options: opts); ctx.restoreGState()
+        ctx.saveGState(); ctx.setAlpha(CGFloat(t)); renderer.draw(afterTree, in: ctx, options: opts); ctx.restoreGState()
+    } else {
+        // After state hold, with very subtle pulse around the changed note
+        renderer.draw(afterTree, in: ctx, options: opts)
+        if changedIndex < afterTree.elements.count {
+            let f = afterTree.elements[changedIndex].frame.insetBy(dx: -10, dy: -10)
+            let tt = Double(frame - (preHold + transition)) / Double(max(1, postHold))
+            let alpha = 0.08 + 0.06 * 0.5 * (1.0 + sin(2 * Double.pi * tt))
+            ctx.setFillColor(CGColor(red: 0.2, green: 0.55, blue: 1.0, alpha: alpha))
+            ctx.fill(f)
+            ctx.setStrokeColor(CGColor(red: 0.2, green: 0.55, blue: 1.0, alpha: min(0.6, alpha + 0.15)))
+            ctx.setLineWidth(2)
+            ctx.stroke(f)
+        }
     }
-    if let img = ctx.makeImage() {
-        addFrame(img, to: dest, delay: 0.14)
-    }
+    if let img = ctx.makeImage() { addFrame(img, to: dest, delay: 0.28) }
 }
 
 if !CGImageDestinationFinalize(dest) {
