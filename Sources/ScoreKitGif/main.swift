@@ -117,6 +117,9 @@ let afterTree = renderer.updateLayout(previous: baseTree, events: annotatedEvent
 
 for frame in 0..<totalFrames {
     let ctx = makeContext(size: size)
+    // Flip to y-down to match renderer's coordinate assumptions
+    ctx.translateBy(x: 0, y: size.height)
+    ctx.scaleBy(x: 1, y: -1)
     // white background
     ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
     ctx.fill(rect)
