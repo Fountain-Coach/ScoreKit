@@ -162,10 +162,25 @@ public struct ScoreView: View {
     @State private var cachedKey: String = ""
 
     private func layoutTree(in rect: CGRect, options: LayoutOptions) -> LayoutTree {
-        let key = layoutKey(size: rect.size, options: options)
-        if key == cachedKey, let t = cachedTree { return t }
+        let optsKey = optionsKey(options)
+        // If we have a previous tree and options compatible, attempt incremental update.
+        if let prev = cachedTree {
+            // Compute changed indices by hashing events
+            let (changed, newHashes) = changedIndices(previousHashes: eventHashes, currentEvents: events)
+            // Use updateLayout which will fallback to full layout if changed is empty
+            let t = renderer.updateLayout(previous: prev, events: events, in: rect, options: options, changed: changed)
+            cachedTree = t
+            cachedKey = layoutKey(size: rect.size, options: options)
+            eventHashes = newHashes
+            lastOptionsKey = optsKey
+            return t
+        }
+        // No previous tree — full layout
         let t = renderer.layout(events: events, in: rect, options: options)
-        cachedKey = key; cachedTree = t
+        cachedKey = layoutKey(size: rect.size, options: options)
+        eventHashes = events.map { hashEvent($0) }
+        lastOptionsKey = optsKey
+        cachedTree = t
         return t
     }
 
@@ -174,17 +189,54 @@ public struct ScoreView: View {
         hasher.combine(Int(size.width)); hasher.combine(Int(size.height))
         hasher.combine(options.barIndices.count)
         for i in options.barIndices { hasher.combine(i) }
+        hasher.combine(options.timeSignature.beatsPerBar)
+        hasher.combine(options.timeSignature.beatUnit)
         hasher.combine(events.count)
         for e in events {
-            switch e.base {
-            case .note(let p, let d): hasher.combine(1); hasher.combine(p.step.rawValue); hasher.combine(p.alter); hasher.combine(p.octave); hasher.combine(d.den)
-            case .rest(let d): hasher.combine(0); hasher.combine(d.den)
-            }
-            hasher.combine(e.slurStart); hasher.combine(e.slurEnd); hasher.combine(e.tieStart); hasher.combine(e.tieEnd)
-            hasher.combine(e.articulations.count)
-            if let dyn = e.dynamic { hasher.combine(dyn.rawValue) }
+            hasher.combine(hashEvent(e))
         }
         return String(hasher.finalize())
+    }
+
+    // MARK: - Incremental diff helpers
+    @State private var eventHashes: [Int] = []
+    @State private var lastOptionsKey: String = ""
+
+    private func optionsKey(_ options: LayoutOptions) -> String {
+        var h = Hasher()
+        h.combine(options.barIndices.count)
+        for i in options.barIndices { h.combine(i) }
+        h.combine(options.timeSignature.beatsPerBar)
+        h.combine(options.timeSignature.beatUnit)
+        return String(h.finalize())
+    }
+
+    private func hashEvent(_ e: NotatedEvent) -> Int {
+        var h = Hasher()
+        switch e.base {
+        case .note(let p, let d):
+            h.combine(1); h.combine(p.step.rawValue); h.combine(p.alter); h.combine(p.octave); h.combine(d.den)
+        case .rest(let d):
+            h.combine(0); h.combine(d.den)
+        }
+        h.combine(e.slurStart); h.combine(e.slurEnd); h.combine(e.tieStart); h.combine(e.tieEnd)
+        h.combine(e.articulations.count)
+        if let dyn = e.dynamic { h.combine(dyn.rawValue) }
+        if let hp = e.hairpinStart { h.combine(hp == .crescendo ? 1 : -1) }
+        h.combine(e.hairpinEnd)
+        return h.finalize()
+    }
+
+    private func changedIndices(previousHashes: [Int], currentEvents: [NotatedEvent]) -> (Set<Int>, [Int]) {
+        let newHashes = currentEvents.map { hashEvent($0) }
+        guard previousHashes.count == newHashes.count else {
+            return (Set(0..<newHashes.count), newHashes)
+        }
+        var changed: Set<Int> = []
+        for i in 0..<newHashes.count {
+            if previousHashes[i] != newHashes[i] { changed.insert(i) }
+        }
+        return (changed, newHashes)
     }
 
     private func nearestIndex(atX x: CGFloat, in tree: LayoutTree) -> Int? {

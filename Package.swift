@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "ScoreKitUI", targets: ["ScoreKitUI"]),
         .executable(name: "ScoreKitDemo", targets: ["ScoreKitDemo"]),
         .executable(name: "ScoreKitBench", targets: ["ScoreKitBench"]),
+        .executable(name: "ScoreKitGif", targets: ["ScoreKitGif"]),
     ],
     targets: [
         .target(
@@ -42,6 +43,11 @@ let package = Package(
             name: "ScoreKitBench",
             dependencies: ["ScoreKitUI"],
             path: "Sources/ScoreKitBench"
+        ),
+        .executableTarget(
+            name: "ScoreKitGif",
+            dependencies: ["ScoreKitUI"],
+            path: "Sources/ScoreKitGif"
         ),
     ]
 )

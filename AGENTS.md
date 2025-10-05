@@ -62,6 +62,7 @@ Constraints:
 ## Real‑Time Renderer (SwiftUI/CoreGraphics)
 - Goals: 60 fps interactions, <16 ms incremental updates, crisp vector output.
 - Layout: per‑measure/system incremental engraving; glyph metric caches.
+- Incremental reflow: `SimpleRenderer.updateLayout` reflows only impacted measures and shifts suffix; expands window to include any intersecting slurs, hairpins, and beam groups for visual correctness.
 - Drawing: CoreGraphics primitives; SwiftUI wrappers; optional SVG export.
 - Interaction: hit‑testing, selection, caret, region highlight, follow‑playhead.
 - Animation: lightweight highlighter for “coaching” changes; integrates with Teatro storyboard concepts.
@@ -99,6 +100,24 @@ Constraints:
 - P50 edit→update ≤ 16 ms; P95 ≤ 33 ms.
 - Full page (A4) ≤ 150 ms on M‑series.
 - Cache bounded; LRU glyph/layout caches.
+- Bench: `ScoreKitBench` runs in CI (release); results uploaded as `bench.txt`. Soft perf checks add warnings for samples > 50 ms without failing builds.
+
+## Benchmarks
+- Local: `cd ScoreKit && swift run -c release ScoreKitBench` (prefer release for stable timings).
+- CI: GitHub Actions runs `ScoreKitBench` in release and uploads `bench.txt` as an artifact; results are also included in the job summary.
+- Thresholds (soft, non-failing warnings):
+  - `layout` samples use `LAYOUT_WARN_MS` (default 30 ms).
+  - `updateLayout` samples use `UPDATE_WARN_MS` (default 60 ms).
+  - Any other lines fall back to `DEFAULT_WARN_MS` (default 50 ms).
+- Tuning thresholds:
+  - Trigger the workflow manually via “Run workflow” (Workflow Dispatch) and set inputs:
+    - `layout_warn_ms` (e.g., 25…40), `update_warn_ms` (e.g., 40…80), `default_warn_ms`.
+  - For permanent adjustments, edit `.github/workflows/ci.yml` env defaults:
+    - `LAYOUT_WARN_MS`, `UPDATE_WARN_MS`, `DEFAULT_WARN_MS`.
+- Reading results:
+  - Warnings annotate lines exceeding thresholds (non-fatal).
+  - Compare across runs; large deltas often indicate logic changes or debug builds.
+  - Measurements vary by runner hardware; compare relative changes more than absolutes.
 
 ---
 
@@ -107,6 +126,7 @@ Constraints:
 - Property: Lily subset round‑trip; idempotent emit/parse.
 - Snapshot: Lily strings, SVG/PNG (small views), layout trees (JSON form).
 - Integration: LilyPond exec on macOS/Linux CI with timeouts and artifact checks.
+ - Incremental layout: targeted tests asserting untouched measures retain positions and suffix shifts uniformly; see `PartialReflowTests`.
 
 ---
 
@@ -115,6 +135,7 @@ Constraints:
 - LilyPond (runtime optional), detected via PATH; not bundled on iOS.
 - PDFKit (display); CoreGraphics (drawing).
 - Optional Verovio interop via feature flag.
+ - CI: GitHub Actions runs tests + `ScoreKitBench` and publishes artifacts.
 
 ---
 
@@ -151,4 +172,3 @@ Definition of Done (per feature)
 ## References
 - AudioTalk VISION.md (semantic layer)
 - LilyPond documentation; MIDI 2.0 UMP specifications; Verovio design notes
-

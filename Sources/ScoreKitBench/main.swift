@@ -35,3 +35,19 @@ for (label, evs) in configs {
     }
 }
 
+// Microbench for incremental update
+do {
+    var evs = makeEvents(count: 32, den: 16)
+    let base = renderer.layout(events: evs, in: rect, options: opts)
+    // Single note duration change inside a measure
+    evs[16] = .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1, 8)))
+    time("updateLayout (1 change @ idx16)") {
+        _ = renderer.updateLayout(previous: base, events: evs, in: rect, options: opts, changed: [16])
+    }
+    // Span with slur across many notes (neighbor-span expansion)
+    var evs2 = evs
+    evs2[8].slurStart = true; evs2[20].slurEnd = true
+    time("updateLayout (slur span 8..20)") {
+        _ = renderer.updateLayout(previous: base, events: evs2, in: rect, options: opts, changed: Set(8...20))
+    }
+}

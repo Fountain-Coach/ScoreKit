@@ -5,13 +5,63 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      layout_warn_ms:
+        description: 'Warn threshold for layout (ms)'
+        required: false
+        default: '30'
+      update_warn_ms:
+        description: 'Warn threshold for updateLayout (ms)'
+        required: false
+        default: '60'
+      default_warn_ms:
+        description: 'Fallback warn threshold (ms)'
+        required: false
+        default: '50'
 
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      LAYOUT_WARN_MS: ${{ github.event.inputs.layout_warn_ms || '30' }}
+      UPDATE_WARN_MS: ${{ github.event.inputs.update_warn_ms || '60' }}
+      DEFAULT_WARN_MS: ${{ github.event.inputs.default_warn_ms || '50' }}
     steps:
       - uses: actions/checkout@v4
       - name: Build
         run: swift build -v
       - name: Test
         run: swift test -v
+      - name: Bench (release)
+        run: |
+          set -euo pipefail
+          swift build -c release -v
+          swift run -c release ScoreKitBench | tee bench.txt
+      - name: Soft perf checks
+        run: |
+          set -euo pipefail
+          awk -v L=${LAYOUT_WARN_MS} -v U=${UPDATE_WARN_MS} -v D=${DEFAULT_WARN_MS} '
+            {
+              print $0; fflush();
+            }
+            /: [0-9.]+ ms$/ {
+              # Extract label prefix and time
+              ms=$NF; sub(/ms$/,"",ms);
+              label=$0; sub(/:.*/, "", label); # remove trailing ": ..."
+              gsub(/^\s+|\s+$/, "", label);
+              thr=D;
+              if (label ~ /^layout /) thr=L;
+              else if (label ~ /^updateLayout /) thr=U;
+              if ((ms+0) > (thr+0)) {
+                printf("::warning title=Perf regression?::%s exceeds %sms (%.2f ms)\n", label, thr, ms+0);
+              }
+            }
+          ' bench.txt
+          echo "## ScoreKitBench Results" >> "$GITHUB_STEP_SUMMARY"
+          cat bench.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload bench artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench.txt
