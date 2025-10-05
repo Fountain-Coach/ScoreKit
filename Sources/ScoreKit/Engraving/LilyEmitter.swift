@@ -30,7 +30,9 @@ public enum LilyEmitter {
         for (i, e) in events.enumerated() {
             switch e.base {
             case let .note(pitch, dur):
-                var token = "\(lp(pitch))\(ld(dur))"
+                var prefix = ""
+                if let dyn = e.dynamic { prefix = "\\\(dyn.rawValue) " }
+                var token = prefix + "\(lp(pitch))\(ld(dur))"
                 for art in e.articulations { token += articulationSuffix(art) }
                 if e.slurStart { token += "(" }
                 if e.slurEnd { token += ")" }
@@ -38,7 +40,9 @@ public enum LilyEmitter {
                 if e.hairpinEnd { token += " \\!" }
                 lines.append(token)
             case let .rest(dur):
-                var token = "r\(ld(dur))"
+                var prefix = ""
+                if let dyn = e.dynamic { prefix = "\\\(dyn.rawValue) " }
+                var token = prefix + "r\(ld(dur))"
                 if e.slurStart { token += "(" }
                 if e.slurEnd { token += ")" }
                 if let hp = e.hairpinStart { token += hairpinStart(hp) }

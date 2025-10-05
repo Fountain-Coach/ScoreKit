@@ -11,19 +11,21 @@ final class RendererLayoutTests: XCTestCase {
             .init(base: .rest(duration: Duration(1, 4)))
         ]
         let r = SimpleRenderer()
-        let tree = r.layout(events: events, in: CGRect(x: 0, y: 0, width: 400, height: 200), options: LayoutOptions())
+        var opts = LayoutOptions(); opts.barIndices = [2]
+        let tree = r.layout(events: events, in: CGRect(x: 0, y: 0, width: 400, height: 200), options: opts)
         XCTAssertEqual(tree.elements.count, 4)
         // ascending x positions
         XCTAssertLessThan(tree.elements[0].frame.minX, tree.elements[1].frame.minX)
         XCTAssertLessThan(tree.elements[1].frame.minX, tree.elements[2].frame.minX)
         // hit test near first note
-        let p = CGPoint(x: tree.elements[0].frame.midX, y: tree.elements[0].frame.midY)
+        let p = CGPoint(x: tree.elements[0].frame.midXVal, y: tree.elements[0].frame.midYVal)
         let hit = r.hitTest(tree, at: p)
         XCTAssertEqual(hit?.index, 0)
         // slur captured
         XCTAssertEqual(tree.slurs.count, 1)
         XCTAssertEqual(tree.slurs[0].startIndex, 1)
         XCTAssertEqual(tree.slurs[0].endIndex, 2)
+        // barline captured at index 2
+        XCTAssertEqual(tree.barX.count, 1)
     }
 }
-

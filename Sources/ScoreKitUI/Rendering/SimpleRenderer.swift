@@ -7,11 +7,12 @@ public struct LayoutOptions: Sendable {
     public var staffSpacing: CGFloat = 10 // distance between staff lines
     public var noteSpacing: CGFloat = 24  // nominal horizontal advance per event
     public var padding: CGSize = .init(width: 20, height: 20)
+    public var barIndices: [Int] = []
     public init() {}
 }
 
 public struct LayoutElement: Sendable {
-    public enum Kind: Sendable { case note(Pitch), rest }
+    public enum Kind: Sendable { case note(Pitch, Duration), rest }
     public let index: Int
     public let kind: Kind
     public let frame: CGRect
@@ -25,6 +26,7 @@ public struct LayoutTree: Sendable {
     public let elements: [LayoutElement]
     public let slurs: [LayoutSlur]
     public let hairpins: [LayoutHairpin]
+    public let barX: [CGFloat]
 }
 
 public struct ScoreHit: Sendable { public let index: Int }
@@ -45,17 +47,20 @@ public struct SimpleRenderer: ScoreRenderable {
         var elements: [LayoutElement] = []
         var slurs: [LayoutSlur] = []
         var hairpins: [LayoutHairpin] = []
+        var barX: [CGFloat] = []
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
+        let optionsBarIndices = Set(options.barIndices)
 
         for (i, e) in events.enumerated() {
             let x = origin.x + CGFloat(i) * options.noteSpacing
+            if optionsBarIndices.contains(i) { barX.append(x) }
             let y: CGFloat
             let frame: CGRect
             switch e.base {
-            case let .note(p, _):
+            case let .note(p, d):
                 y = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
                 frame = CGRect(x: x - 5, y: y - 5, width: 10, height: 10)
-                elements.append(LayoutElement(index: i, kind: .note(p), frame: frame))
+                elements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
             case .rest:
                 y = origin.y + staffHeight/2 - 3
                 frame = CGRect(x: x - 4, y: y - 4, width: 8, height: 8)
@@ -72,7 +77,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 }
             }
         }
-        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins)
+        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX)
     }
 
     public func draw(_ tree: LayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -89,6 +94,17 @@ public struct SimpleRenderer: ScoreRenderable {
         }
         ctx.strokePath()
 
+        // Draw barlines
+        let top = options.padding.height
+        let bottom = tree.size.height - options.padding.height
+        for x in tree.barX {
+            ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+            ctx.setLineWidth(1)
+            ctx.move(to: CGPoint(x: x, y: top))
+            ctx.addLine(to: CGPoint(x: x, y: bottom))
+            ctx.strokePath()
+        }
+
         // Draw notes/rests
         for el in tree.elements {
             switch el.kind {
@@ -98,6 +114,34 @@ public struct SimpleRenderer: ScoreRenderable {
             case .rest:
                 ctx.setFillColor(CGColor(gray: 0.5, alpha: 1.0))
                 ctx.fill(el.frame)
+            }
+        }
+
+        // Draw stems and basic flags for notes
+        for el in tree.elements {
+            guard case let .note(_, dur) = el.kind else { continue }
+            let stemUp = el.frame.midYVal < (options.padding.height + options.staffSpacing * 2) // below middle line -> stems up
+            let stemLength: CGFloat = 30
+            let x = stemUp ? el.frame.maxX : el.frame.minX
+            let y1 = el.frame.midYVal
+            let y2 = stemUp ? (y1 - stemLength) : (y1 + stemLength)
+            ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+            ctx.setLineWidth(1)
+            ctx.move(to: CGPoint(x: x, y: y1))
+            ctx.addLine(to: CGPoint(x: x, y: y2))
+            ctx.strokePath()
+            // flags for eighth and beyond
+            let flags = flagCount(for: dur)
+            for i in 0..<flags {
+                let offset: CGFloat = CGFloat(i) * 6
+                if stemUp {
+                    ctx.move(to: CGPoint(x: x, y: y2 + offset))
+                    ctx.addQuadCurve(to: CGPoint(x: x + 10, y: y2 + offset + 4), control: CGPoint(x: x + 6, y: y2 + offset))
+                } else {
+                    ctx.move(to: CGPoint(x: x, y: y2 - offset))
+                    ctx.addQuadCurve(to: CGPoint(x: x - 10, y: y2 - offset - 4), control: CGPoint(x: x - 6, y: y2 - offset))
+                }
+                ctx.strokePath()
             }
         }
 
@@ -161,6 +205,16 @@ public struct SimpleRenderer: ScoreRenderable {
         let c4Y = originY + staffSpacing * 5 // place C4 below staff by two spaces
         let offset = -CGFloat(diatonic) * (staffSpacing / 2)
         return c4Y + offset
+    }
+
+    private func flagCount(for d: Duration) -> Int {
+        switch d.den {
+        case 1,2,4: return 0
+        case 8: return 1
+        case 16: return 2
+        case 32: return 3
+        default: return 0
+        }
     }
 }
 

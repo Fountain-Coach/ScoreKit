@@ -1,13 +1,17 @@
 import Foundation
 
-public enum Articulation: Codable, Sendable {
+public enum Articulation: Codable, Sendable, Equatable {
     case staccato
     case accent
 }
 
-public enum Hairpin: Codable, Sendable {
+public enum Hairpin: Codable, Sendable, Equatable {
     case crescendo
     case decrescendo
+}
+
+public enum DynamicLevel: String, Codable, Sendable, Equatable {
+    case p, f, mp, mf, pp, ff
 }
 
 public struct NotatedEvent: Codable, Sendable {
@@ -17,19 +21,22 @@ public struct NotatedEvent: Codable, Sendable {
     public var articulations: [Articulation]
     public var hairpinStart: Hairpin?
     public var hairpinEnd: Bool
+    public var dynamic: DynamicLevel?
 
     public init(base: Event,
                 slurStart: Bool = false,
                 slurEnd: Bool = false,
                 articulations: [Articulation] = [],
                 hairpinStart: Hairpin? = nil,
-                hairpinEnd: Bool = false) {
+                hairpinEnd: Bool = false,
+                dynamic: DynamicLevel? = nil) {
         self.base = base
         self.slurStart = slurStart
         self.slurEnd = slurEnd
         self.articulations = articulations
         self.hairpinStart = hairpinStart
         self.hairpinEnd = hairpinEnd
+        self.dynamic = dynamic
     }
 }
 
@@ -42,6 +49,7 @@ public enum PatchOp: Codable, Sendable {
     case slur(start: Int, end: Int)
     case hairpin(start: Int, end: Int, type: Hairpin)
     case articulation(index: Int, articulation: Articulation)
+    case dynamic(index: Int, level: DynamicLevel)
 }
 
 public enum Transform {
@@ -69,6 +77,13 @@ public enum Transform {
         }
         return (v, [.articulation(index: index, articulation: articulation)])
     }
+
+    public static func setDynamic(to voice: Voice, index: Int, level: DynamicLevel) -> (Voice, [PatchOp]) {
+        var v = voice
+        guard index >= 0, index < v.events.count else { return (v, []) }
+        v.events[index].dynamic = level
+        return (v, [.dynamic(index: index, level: level)])
+    }
 }
 
 private extension Articulation {
@@ -79,4 +94,3 @@ private extension Articulation {
         }
     }
 }
-
