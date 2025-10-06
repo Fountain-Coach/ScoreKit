@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import ScoreKit
+import CoreText
 
 public struct MultiLayoutTree: Sendable {
     public let size: CGSize
@@ -9,6 +10,7 @@ public struct MultiLayoutTree: Sendable {
     public let voices: [Int] // parallel to elements
     public let slurs: [LayoutSlur]
     public let ties: [LayoutTie]
+    public let articulations: [Int: [Articulation]]
 }
 
 public struct MultiRenderer {
@@ -21,7 +23,7 @@ public struct MultiRenderer {
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
 
         guard let v0 = vv.first, !v0.isEmpty else {
-            return MultiLayoutTree(size: rect.size, elements: [], barX: [], voices: [], slurs: [], ties: [])
+            return MultiLayoutTree(size: rect.size, elements: [], barX: [], voices: [], slurs: [], ties: [], articulations: [:])
         }
 
         // Compute x anchors from the first voice; align others to the same anchors.
@@ -37,6 +39,7 @@ public struct MultiRenderer {
         var voices: [Int] = []
         var barX: [CGFloat] = []
         var indexMap: [[Int]] = vv.map { _ in Array(repeating: -1, count: anchorsX.count) }
+        var artMap: [Int: [Articulation]] = [:]
         let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
         let beatUnit = max(1, options.timeSignature.beatUnit)
         var beatsInBar = 0
@@ -47,12 +50,21 @@ public struct MultiRenderer {
             let m = min(vv[0].count, vv[1].count, anchorsX.count)
             for i in 0..<m {
                 switch (vv[0][i].base, vv[1][i].base) {
-                case (.note(let p0, _), .note(let p1, _)) where p0.step == p1.step && p0.alter == p1.alter && p0.octave == p1.octave:
-                    // Unison: split heads left/right around anchor
-                    offsets[0][i] = -4
-                    offsets[1][i] = +4
+                case (.note(let p0, _), .note(let p1, _)):
+                    if p0.step == p1.step && p0.alter == p1.alter && p0.octave == p1.octave {
+                        offsets[0][i] = -4; offsets[1][i] = +4
+                    } else {
+                        let y0 = trebleYOffset(for: p0, staffSpacing: options.staffSpacing, originY: origin.y)
+                        let y1 = trebleYOffset(for: p1, staffSpacing: options.staffSpacing, originY: origin.y)
+                        let dy = abs(y0 - y1)
+                        if abs(dy - (options.staffSpacing/2)) <= 0.75 {
+                            // Second interval: split heads
+                            offsets[0][i] = -4; offsets[1][i] = +4
+                        } else {
+                            offsets[1][i] = +9
+                        }
+                    }
                 default:
-                    // Default separation: voice 1 nudged right
                     offsets[1][i] = +9
                 }
             }
@@ -107,10 +119,14 @@ public struct MultiRenderer {
                         if a >= 0, b >= 0 { ties.append(LayoutTie(startIndex: a, endIndex: b)) }
                     }
                 }
+                if !v[i].articulations.isEmpty {
+                    let a = indexMap[vi][i]
+                    if a >= 0 { artMap[a] = v[i].articulations }
+                }
             }
         }
 
-        return MultiLayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, barX: barX, voices: voices, slurs: slurs, ties: ties)
+        return MultiLayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, barX: barX, voices: voices, slurs: slurs, ties: ties, articulations: artMap)
     }
 
     public func draw(_ tree: MultiLayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -133,15 +149,19 @@ public struct MultiRenderer {
             ctx.addLine(to: CGPoint(x: x, y: bottom))
             ctx.strokePath()
         }
-        // Noteheads
+        // Clef/Key/Time
+        drawTrebleClefSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing)
+        drawKeySignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, clef: .treble, fifths: 0)
+        drawTimeSignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, time: options.timeSignature)
+
+        // Noteheads and rests (SMuFL)
         for el in tree.elements {
             switch el.kind {
-            case .note:
-                ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
-                ctx.fillEllipse(in: el.frame)
+            case .note(let p, let d):
+                if p.alter != 0 { drawAccidentalSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.minX - 12, y: el.frame.midYVal), alter: p.alter, staffSpacing: options.staffSpacing) }
+                drawNoteheadSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: el.frame.midYVal), durationDen: d.den, staffSpacing: options.staffSpacing)
             case .rest:
-                ctx.setFillColor(CGColor(gray: 0.5, alpha: 1.0))
-                ctx.fill(el.frame)
+                drawRestSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: el.frame.midYVal), durationDen: 4, staffSpacing: options.staffSpacing)
             }
         }
         // Stems per voice: voice 0 up (right), voice 1 down (left)
@@ -151,7 +171,8 @@ public struct MultiRenderer {
             let voice = tree.voices[idx]
             let stemUp = (voice == 0)
             let stemLength: CGFloat = options.staffSpacing * 3.5
-            let x = stemUp ? (el.frame.maxX + 0.5) : (el.frame.minX - 0.5)
+            let halfW = noteheadHalfWidth(forDen: (durationDenMulti(for: el)), staffSpacing: options.staffSpacing)
+            let x = stemUp ? (el.frame.midXVal + halfW) : (el.frame.midXVal - halfW)
             let y1 = el.frame.midYVal
             let y2 = stemUp ? (y1 - stemLength) : (y1 + stemLength)
             ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
@@ -159,18 +180,10 @@ public struct MultiRenderer {
             ctx.move(to: CGPoint(x: x, y: y1))
             ctx.addLine(to: CGPoint(x: x, y: y2))
             ctx.strokePath()
-            // simple flags for eighth+ if needed
+            // SMuFL flags for un-beamed notes (MultiRenderer does not compute beaming yet)
             let flags = self.flagCount(for: dur)
-            for i in 0..<flags {
-                let offset: CGFloat = CGFloat(i) * 6
-                if stemUp {
-                    ctx.move(to: CGPoint(x: x, y: y2 + offset))
-                    ctx.addQuadCurve(to: CGPoint(x: x + 10, y: y2 + offset + 4), control: CGPoint(x: x + 6, y: y2 + offset))
-                } else {
-                    ctx.move(to: CGPoint(x: x, y: y2 - offset))
-                    ctx.addQuadCurve(to: CGPoint(x: x - 10, y: y2 - offset - 4), control: CGPoint(x: x - 6, y: y2 - offset))
-                }
-                ctx.strokePath()
+            if flags > 0 {
+                drawFlagSMuFL(in: ctx, canvasHeight: tree.size.height, atStemX: x, stemTipY: y2, stemUp: stemUp, flags: flags, staffSpacing: options.staffSpacing)
             }
         }
 
@@ -211,6 +224,23 @@ public struct MultiRenderer {
             ctx.move(to: start2)
             ctx.addQuadCurve(to: end2, control: ctrl2)
             ctx.strokePath()
+        }
+
+        // Articulations per element index
+        for (idx, el) in tree.elements.enumerated() {
+            guard case .note = el.kind else { continue }
+            guard let arts = tree.articulations[idx], !arts.isEmpty else { continue }
+            let voice = tree.voices[idx]
+            let stemUp = (voice == 0)
+            let baseY = stemUp ? (el.frame.minY - options.staffSpacing * 1.0) : (el.frame.maxY + options.staffSpacing * 0.9)
+            let font = smuflFont(ofSize: options.staffSpacing * 1.4)
+            var x = el.frame.midXVal
+            for (i, a) in arts.enumerated() {
+                let glyph = SMuFL.articulationGlyph(a)
+                let y = baseY + (stemUp ? -CGFloat(i) * (options.staffSpacing * 0.6) : CGFloat(i) * (options.staffSpacing * 0.6))
+                drawSMuFLText(ctx, canvasHeight: tree.size.height, text: glyph, at: CGPoint(x: x, y: y), font: font, alignCenter: true)
+                x += options.staffSpacing * 0.9
+            }
         }
     }
 
@@ -254,5 +284,72 @@ public struct MultiRenderer {
         case 32: return 3
         default: return 0
         }
+    }
+
+    private func durationDenMulti(for el: LayoutElement) -> Int {
+        if case let .note(_, d) = el.kind { return d.den }
+        return 4
+    }
+
+    // SMuFL helpers (subset, centralized via SMuFLCatalog)
+    private func smuflFont(ofSize size: CGFloat) -> CTFont { SMuFL.font(ofSize: size) }
+    private func drawSMuFLText(_ ctx: CGContext, canvasHeight: CGFloat, text: String, at p: CGPoint, font: CTFont, alignCenter: Bool = false) {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: CGColor(gray: 0.0, alpha: 1.0)]
+        let attr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attr)
+        ctx.saveGState(); ctx.textMatrix = .identity; ctx.translateBy(x: 0, y: canvasHeight); ctx.scaleBy(x: 1, y: -1)
+        var pos = CGPoint(x: p.x, y: canvasHeight - p.y)
+        if alignCenter {
+            let b = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
+            pos.x -= b.midX; pos.y -= b.midY
+        }
+        ctx.textPosition = pos; CTLineDraw(line, ctx); ctx.restoreGState()
+    }
+    private func drawAccidentalSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at p: CGPoint, alter: Int, staffSpacing: CGFloat) {
+        let font = smuflFont(ofSize: staffSpacing * 1.3)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.accidentalGlyph(for: alter), at: p, font: font)
+    }
+    private func smuflNoteheadGlyph(forDen den: Int) -> String { SMuFL.noteheadGlyph(forDen: den) }
+    private func drawNoteheadSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
+        let glyph = smuflNoteheadGlyph(forDen: durationDen)
+        let font = smuflFont(ofSize: staffSpacing * 1.6)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+    }
+    private func noteheadHalfWidth(forDen den: Int, staffSpacing: CGFloat) -> CGFloat {
+        let glyph = smuflNoteheadGlyph(forDen: den); let font = smuflFont(ofSize: staffSpacing * 1.6)
+        let attr = NSAttributedString(string: glyph, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attr)
+        let b = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
+        return max(b.width, staffSpacing * 1.2) / 2
+    }
+    private func drawRestSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
+        let font = smuflFont(ofSize: staffSpacing * 2.0)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.restGlyph(forDen: durationDen), at: center, font: font, alignCenter: true)
+    }
+    private func drawTrebleClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
+        let font = smuflFont(ofSize: staffSpacing * 4.6); let p = CGPoint(x: origin.x - staffSpacing * 0.8, y: origin.y + staffSpacing * 4.0)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: p, font: font)
+    }
+    private func drawKeySignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, clef: LayoutOptions.Clef, fifths: Int) {
+        // No‑op in Multi for now (treble only)
+    }
+    private func drawTimeSignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, time: (beatsPerBar: Int, beatUnit: Int)) {
+        let font = smuflFont(ofSize: staffSpacing * 2.2)
+        let x = origin.x + staffSpacing * 6.4
+        let centerY = origin.y + staffSpacing * 2
+        let numY = centerY - staffSpacing * 0.9
+        let denY = centerY + staffSpacing * 1.0
+        let numStr = String(time.beatsPerBar).compactMap { Int(String($0)) }
+        let denStr = String(time.beatUnit).compactMap { Int(String($0)) }
+        var adv: CGFloat = 0
+        for d in numStr { drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.timeSigGlyph(digit: d), at: CGPoint(x: x + adv, y: numY), font: font, alignCenter: true); adv += staffSpacing * 1.2 }
+        adv = 0
+        for d in denStr { drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.timeSigGlyph(digit: d), at: CGPoint(x: x + adv, y: denY), font: font, alignCenter: true); adv += staffSpacing * 1.2 }
+    }
+    // Flags
+    private func drawFlagSMuFL(in ctx: CGContext, canvasHeight: CGFloat, atStemX x: CGFloat, stemTipY y: CGFloat, stemUp: Bool, flags: Int, staffSpacing: CGFloat) {
+        guard let glyph = SMuFL.flagGlyph(flags: flags, stemUp: stemUp) else { return }
+        let font = smuflFont(ofSize: staffSpacing * 2.0)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x, y: y), font: font, alignCenter: false)
     }
 }
