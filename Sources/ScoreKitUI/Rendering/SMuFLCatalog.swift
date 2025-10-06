@@ -106,5 +106,19 @@ public enum SMuFL {
         default: return nil
         }
     }
-}
 
+    // Key signature step tables (staff steps from top, in half-steps per staff space = staffSpacing/2 units)
+    // Values correspond to vertical positions used by SimpleRenderer for treble/bass.
+    public static func keySignatureSteps(clef: LayoutOptions.Clef, isSharp: Bool) -> [Int] {
+        // Treble: sharp steps (F#, C#, G#, D#, A#, E#, B#) -> [8,5,9,6,3,7,4]
+        // Treble: flat steps (Bb, Eb, Ab, Db, Gb, Cb, Fb) -> [4,7,3,6,2,5,1]
+        // Bass:   sharp steps -> [3,6,2,5,1,4,0]
+        // Bass:   flat steps  -> [6,3,7,4,1,5,2]
+        switch (clef, isSharp) {
+        case (.treble, true): return [8,5,9,6,3,7,4]
+        case (.treble, false): return [4,7,3,6,2,5,1]
+        case (.bass, true): return [3,6,2,5,1,4,0]
+        case (.bass, false): return [6,3,7,4,1,5,2]
+        }
+    }
+}

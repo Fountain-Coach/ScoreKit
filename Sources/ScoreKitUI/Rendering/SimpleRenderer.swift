@@ -840,18 +840,7 @@ extension SimpleRenderer {
         let isSharp = fifths > 0
         let font = smuflFont(ofSize: staffSpacing * 1.3)
         let glyph = isSharp ? "\u{E262}" : "\u{E260}"
-        // Approximate staff step positions for accidentals per clef
-        let trebleSharps = [8,5,9,6,3,7,4]
-        let trebleFlats  = [4,7,3,6,2,5,1]
-        let bassSharps   = [3,6,2,5,1,4,0]
-        let bassFlats    = [6,3,7,4,1,5,2]
-        let steps: [Int]
-        switch (clef, isSharp) {
-        case (.treble, true): steps = trebleSharps
-        case (.treble, false): steps = trebleFlats
-        case (.bass, true): steps = bassSharps
-        case (.bass, false): steps = bassFlats
-        }
+        let steps = SMuFL.keySignatureSteps(clef: clef, isSharp: isSharp)
         let startX = origin.x + staffSpacing * 1.6
         let xStep = staffSpacing * 0.9
         for i in 0..<count {
