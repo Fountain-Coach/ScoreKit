@@ -839,7 +839,7 @@ extension SimpleRenderer {
         let count = min(7, abs(fifths))
         let isSharp = fifths > 0
         let font = smuflFont(ofSize: staffSpacing * 1.3)
-        let glyph = isSharp ? "\u{E262}" : "\u{E260}"
+        let glyph = SMuFL.accidentalGlyph(for: isSharp ? 1 : -1)
         let steps = SMuFL.keySignatureSteps(clef: clef, isSharp: isSharp)
         let startX = origin.x + staffSpacing * 1.6
         let xStep = staffSpacing * 0.9
