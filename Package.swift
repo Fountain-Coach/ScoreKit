@@ -16,10 +16,9 @@ let package = Package(
         .executable(name: "ScoreKitVid", targets: ["ScoreKitVid"]),
         .executable(name: "ScoreKitSnap", targets: ["ScoreKitSnap"]),
     ],
-    // Engraving engine (external) — declared for integration; not required for build here.
-    // Resolving this dependency is optional until ScoreKit begins importing its APIs.
+    // Engraving engine (local path) — RulesKit manual API for offline builds.
     dependencies: [
-        // .package(url: "https://github.com/Fountain-Coach/Engraving", branch: "main")
+        .package(path: "../Engraving/codegen/swift/RulesKit-SPM")
     ],
     targets: [
         .target(
@@ -32,7 +31,7 @@ let package = Package(
         ),
         .target(
             name: "ScoreKitUI",
-            dependencies: ["ScoreKit"],
+            dependencies: ["ScoreKit", "RulesKit"],
             path: "Sources/ScoreKitUI"
         ),
         .testTarget(

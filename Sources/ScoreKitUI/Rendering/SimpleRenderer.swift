@@ -3,6 +3,7 @@ import CoreGraphics
 import SwiftUI
 import CoreText
 import ScoreKit
+import RulesKit
 
 public struct LayoutOptions: Sendable {
     public var staffSpacing: CGFloat = 10 // distance between staff lines
@@ -737,33 +738,18 @@ public struct SimpleRenderer: ScoreRenderable {
     }
 
     private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int) -> ([[Int]], [Int]) {
-        var groups: [[Int]] = []
-        var levels: [Int] = Array(repeating: 0, count: elements.count)
-        let isCompound = (beatUnit == 8) && (beatsPerBar % 3 == 0)
-        let groupSize: Double = isCompound ? 3.0 : 1.0 // units of eighth-beats when beatUnit=8
-
-        func compoundIndex(forStartPos pos: Double) -> Int { Int(floor(pos / groupSize)) }
-
-        var i = 0
-        while i < elements.count {
-            guard i < beatPos.count else { break }
-            guard case .note(_, let d) = elements[i].kind, d.den >= 8 else { i += 1; continue }
-            levels[i] = beamLevelFor(elements[i])
-            let startGroup = isCompound ? compoundIndex(forStartPos: (i == 0 ? 0.0 : beatPos[i-1])) : intBeatIndex(beatPos[i])
-            var j = i + 1
-            var group: [Int] = [i]
-            while j < elements.count, j < beatPos.count {
-                guard case .note(_, let d2) = elements[j].kind, d2.den >= 8 else { break }
-                let gj = isCompound ? compoundIndex(forStartPos: (j == 0 ? 0.0 : beatPos[j-1])) : intBeatIndex(beatPos[j])
-                if gj != startGroup { break }
-                levels[j] = beamLevelFor(elements[j])
-                group.append(j)
-                j += 1
+        var isNote: [Bool] = []
+        var denoms: [Int] = []
+        isNote.reserveCapacity(elements.count)
+        denoms.reserveCapacity(elements.count)
+        for el in elements {
+            switch el.kind {
+            case .note(_, let d): isNote.append(true); denoms.append(d.den)
+            case .rest: isNote.append(false); denoms.append(0)
             }
-            if group.count >= 2 { groups.append(group) }
-            i = j
         }
-        return (groups, levels)
+        let result = BeamingRules.computeGroups(beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, isNote: isNote, denoms: denoms)
+        return (result.groups, result.levels)
     }
 
     private func beamLevelFor(_ el: LayoutElement) -> Int {
