@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import SwiftUI
+import CoreText
 import ScoreKit
 
 public struct LayoutOptions: Sendable {
@@ -9,6 +10,10 @@ public struct LayoutOptions: Sendable {
     public var padding: CGSize = .init(width: 20, height: 20)
     public var barIndices: [Int] = []
     public var timeSignature: (beatsPerBar: Int, beatUnit: Int) = (4,4)
+    public enum Clef: Sendable { case treble, bass }
+    public var clef: Clef = .treble
+    // Key signature in fifths: positive = sharps, negative = flats
+    public var keySignatureFifths: Int = 0
     public init() {}
 }
 
@@ -29,6 +34,10 @@ public struct LayoutTree: Sendable {
     public let slurs: [LayoutSlur]
     public let hairpins: [LayoutHairpin]
     public let ties: [LayoutTie]
+    public let articulations: [Int: [Articulation]]
+    public let dynamics: [Int: DynamicLevel]
+    public struct LayoutMarks: Sendable { public let clef: ClefType?; public let keyFifths: Int?; public let time: (Int,Int)? }
+    public let marks: [Int: LayoutMarks]
     public let barX: [CGFloat]
     public let beatPos: [Double]
     public let beamGroups: [[Int]]
@@ -55,6 +64,9 @@ public struct SimpleRenderer: ScoreRenderable {
         var hairpins: [LayoutHairpin] = []
         var ties: [LayoutTie] = []
         var barX: [CGFloat] = []
+        var artMap: [Int: [Articulation]] = [:]
+        var dynMap: [Int: DynamicLevel] = [:]
+        var marks: [Int: LayoutMarks] = [:]
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
         let optionsBarIndices = Set(options.barIndices)
 
@@ -75,7 +87,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 if let cached = yCache[p] {
                     y = cached
                 } else {
-                    let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y)
+                    let yy = yOffset(for: p, clef: options.clef, staffSpacing: options.staffSpacing, originY: origin.y)
                     yCache[p] = yy; y = yy
                 }
                 frame = CGRect(x: x - 5, y: y - 5, width: 10, height: 10)
@@ -124,9 +136,17 @@ public struct SimpleRenderer: ScoreRenderable {
                     ties.append(LayoutTie(startIndex: i, endIndex: end))
                 }
             }
+            if !events[i].articulations.isEmpty { artMap[i] = events[i].articulations }
+            if let dyn = events[i].dynamic { dynMap[i] = dyn }
+            if events[i].clefChange != nil || events[i].keyChangeFifths != nil || events[i].timeChange != nil {
+                let clef = events[i].clefChange
+                let keyF = events[i].keyChangeFifths
+                let t = events[i].timeChange.map { ($0.beatsPerBar, $0.beatUnit) }
+                marks[i] = LayoutMarks(clef: clef, keyFifths: keyF, time: t)
+            }
         }
         let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
-        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, ties: ties, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
+        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, ties: ties, articulations: artMap, dynamics: dynMap, marks: marks, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     public func draw(_ tree: LayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -143,6 +163,16 @@ public struct SimpleRenderer: ScoreRenderable {
         }
         ctx.strokePath()
 
+        // SMuFL clef rendering (treble), best-effort if font present
+        switch options.clef {
+        case .treble:
+            drawTrebleClefSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing)
+        case .bass:
+            drawBassClefSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing)
+        }
+        drawKeySignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, clef: options.clef, fifths: options.keySignatureFifths)
+        drawTimeSignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, time: options.timeSignature)
+
         // Draw barlines
         let top = options.padding.height
         let bottom = tree.size.height - options.padding.height
@@ -154,19 +184,84 @@ public struct SimpleRenderer: ScoreRenderable {
             ctx.strokePath()
         }
 
-        // Draw notes/rests
+        // Draw notes/rests (ledger lines handled below) with accidentals and SMuFL noteheads
         for el in tree.elements {
             switch el.kind {
-            case .note:
-                ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
-                ctx.fillEllipse(in: el.frame)
+            case .note(let p, _):
+                if p.alter != 0 {
+                    drawAccidentalSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.minX - 12, y: el.frame.midYVal), alter: p.alter, staffSpacing: options.staffSpacing)
+                }
+                drawNoteheadSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: el.frame.midYVal), durationDen: durationDen(for: el), staffSpacing: options.staffSpacing)
             case .rest:
-                ctx.setFillColor(CGColor(gray: 0.5, alpha: 1.0))
+                // SMuFL rest glyph (best effort), with simple fallback rectangle
+                // We don't have direct access to duration here; fallback to quarter rest glyph size
+                drawRestSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: el.frame.midYVal), durationDen: 4, staffSpacing: options.staffSpacing)
+                ctx.setFillColor(CGColor(gray: 0.5, alpha: 0.12))
                 ctx.fill(el.frame)
             }
         }
 
-        // Draw stems and basic flags for notes
+        // Render mid-score clef/key/time changes near the event positions
+        for el in tree.elements {
+            let idx = el.index
+            guard let mark = tree.marks[idx] else { continue }
+            var x = el.frame.minX - options.staffSpacing * 1.2
+            if let clef = mark.clef {
+                switch clef {
+                case .treble: drawTrebleClefSMuFL(in: ctx, canvasHeight: tree.size.height, origin: CGPoint(x: x, y: options.padding.height), staffSpacing: options.staffSpacing)
+                case .bass: drawBassClefSMuFL(in: ctx, canvasHeight: tree.size.height, origin: CGPoint(x: x, y: options.padding.height), staffSpacing: options.staffSpacing)
+                }
+                x += options.staffSpacing * 1.6
+            }
+            if let k = mark.keyFifths {
+                drawKeySignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: CGPoint(x: x, y: options.padding.height), staffSpacing: options.staffSpacing, clef: options.clef, fifths: k)
+                x += CGFloat(abs(k)) * options.staffSpacing * 0.9
+            }
+            if let t = mark.time { drawTimeSignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: CGPoint(x: x, y: options.padding.height), staffSpacing: options.staffSpacing, time: t) }
+        }
+
+        // Draw dynamics glyphs at events with dynamics
+        for (idx, dyn) in tree.dynamics {
+            guard idx < tree.elements.count else { continue }
+            let el = tree.elements[idx]
+            let y = max(el.frame.maxY + options.staffSpacing * 1.4, options.padding.height + options.staffSpacing * 2.2)
+            drawDynamicsSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: y), level: dyn, staffSpacing: options.staffSpacing)
+        }
+
+        // Ledger lines for notes beyond staff
+        let topLine = origin.y
+        let bottomLine = origin.y + options.staffSpacing * 4
+        ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+        ctx.setLineWidth(1)
+        for el in tree.elements {
+            guard case .note = el.kind else { continue }
+            let midY = el.frame.midYVal
+            let x1 = el.frame.midXVal - 7
+            let x2 = el.frame.midXVal + 7
+            if midY < topLine {
+                var ly = topLine - options.staffSpacing
+                while ly >= midY {
+                    ctx.move(to: CGPoint(x: x1, y: ly))
+                    ctx.addLine(to: CGPoint(x: x2, y: ly))
+                    ly -= options.staffSpacing
+                }
+                ctx.strokePath()
+            } else if midY > bottomLine {
+                var ly = bottomLine + options.staffSpacing
+                while ly <= midY {
+                    ctx.move(to: CGPoint(x: x1, y: ly))
+                    ctx.addLine(to: CGPoint(x: x2, y: ly))
+                    ly += options.staffSpacing
+                }
+                ctx.strokePath()
+            }
+        }
+
+        // Precompute which indices are in beam groups to suppress individual flags
+        var beamedIndices: Set<Int> = []
+        for g in tree.beamGroups { for idx in g { beamedIndices.insert(idx) } }
+
+        // Draw stems and flags (use SMuFL flag glyphs for un-beamed notes)
         for el in tree.elements {
             guard case let .note(_, dur) = el.kind else { continue }
             // Stems up when notehead is below middle line (greater Y in screen coords).
@@ -175,8 +270,9 @@ public struct SimpleRenderer: ScoreRenderable {
             let stemUp = el.frame.midYVal > middleY
             // Standard stem length ≈ 3.5 staff spaces for single notes
             let stemLength: CGFloat = options.staffSpacing * 3.5
-            // Attach on right for up-stems, left for down-stems (more font-like slight offset)
-            let x = stemUp ? (el.frame.maxX + 0.5) : (el.frame.minX - 0.5)
+            // Attach relative to SMuFL notehead width (approx)
+            let halfW = noteheadHalfWidth(forDen: durationDen(for: el), staffSpacing: options.staffSpacing)
+            let x = stemUp ? (el.frame.midXVal + halfW) : (el.frame.midXVal - halfW)
             let y1 = el.frame.midYVal
             let y2 = stemUp ? (y1 - stemLength) : (y1 + stemLength)
             ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
@@ -186,16 +282,14 @@ public struct SimpleRenderer: ScoreRenderable {
             ctx.strokePath()
             // flags for eighth and beyond
             let flags = flagCount(for: dur)
-            for i in 0..<flags {
-                let offset: CGFloat = CGFloat(i) * 6
-                if stemUp {
-                    ctx.move(to: CGPoint(x: x, y: y2 + offset))
-                    ctx.addQuadCurve(to: CGPoint(x: x + 10, y: y2 + offset + 4), control: CGPoint(x: x + 6, y: y2 + offset))
-                } else {
-                    ctx.move(to: CGPoint(x: x, y: y2 - offset))
-                    ctx.addQuadCurve(to: CGPoint(x: x - 10, y: y2 - offset - 4), control: CGPoint(x: x - 6, y: y2 - offset))
-                }
-                ctx.strokePath()
+            if flags > 0 && !beamedIndices.contains(el.index) {
+                drawFlagSMuFL(in: ctx,
+                              canvasHeight: tree.size.height,
+                              atStemX: x,
+                              stemTipY: y2,
+                              stemUp: stemUp,
+                              flags: flags,
+                              staffSpacing: options.staffSpacing)
             }
         }
 
@@ -273,6 +367,29 @@ public struct SimpleRenderer: ScoreRenderable {
             }
         }
 
+        // Draw articulations (SMuFL) per note by event index
+        for el in tree.elements {
+            guard case .note = el.kind else { continue }
+            guard let arts = tree.articulations[el.index], !arts.isEmpty else { continue }
+            let middleY = (options.padding.height + options.staffSpacing * 2)
+            let stemUp = el.frame.midYVal > middleY
+            let baseY = stemUp ? (el.frame.minY - options.staffSpacing * 1.0) : (el.frame.maxY + options.staffSpacing * 0.9)
+            var x = el.frame.midXVal
+            let font = smuflFont(ofSize: options.staffSpacing * 1.4)
+            for (idx, a) in arts.enumerated() {
+                let glyph: String
+                switch a {
+                case .staccato: glyph = "\u{E4A2}"
+                case .tenuto: glyph = "\u{E4A4}"
+                case .accent: glyph = "\u{E4AC}"
+                case .marcato: glyph = "\u{E4AE}"
+                }
+                let y = baseY + (stemUp ? -CGFloat(idx) * (options.staffSpacing * 0.6) : CGFloat(idx) * (options.staffSpacing * 0.6))
+                drawSMuFLText(ctx, canvasHeight: tree.size.height, text: glyph, at: CGPoint(x: x, y: y), font: font, alignCenter: true)
+                x += options.staffSpacing * 0.9
+            }
+        }
+
         // Draw beaming across consecutive eighth-or-shorter notes; compound meters group by dotted beats
         var i = 0
         while i < tree.elements.count {
@@ -295,12 +412,13 @@ public struct SimpleRenderer: ScoreRenderable {
                 let last = tree.elements[group.last!]
                 let middleY = (options.padding.height + options.staffSpacing * 2)
                 let stemUp = first.frame.midYVal > middleY
+                let halfW = noteheadHalfWidth(forDen: durationDen(for: first), staffSpacing: options.staffSpacing)
                 let tipYFirst = stemUp ? (first.frame.midYVal - stemLength) : (first.frame.midYVal + stemLength)
                 let tipYLast = stemUp ? (last.frame.midYVal - stemLength) : (last.frame.midYVal + stemLength)
                 ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
                 ctx.setLineWidth(3)
-                let xStart = first.frame.midXVal
-                let xEnd = last.frame.midXVal
+                let xStart = first.frame.midXVal + (stemUp ? halfW : -halfW)
+                let xEnd = last.frame.midXVal + (stemUp ? halfW : -halfW)
                 ctx.move(to: CGPoint(x: xStart, y: tipYFirst))
                 ctx.addLine(to: CGPoint(x: xEnd, y: tipYLast))
                 ctx.strokePath()
@@ -310,8 +428,8 @@ public struct SimpleRenderer: ScoreRenderable {
                     let level = min(beamLevelFor(tree.elements[a]), beamLevelFor(tree.elements[b]))
                     if level >= 2 {
                         // Draw segment along slanted beam with offset
-                        let xa = tree.elements[a].frame.midXVal
-                        let xb = tree.elements[b].frame.midXVal
+                        let xa = tree.elements[a].frame.midXVal + (stemUp ? halfW : -halfW)
+                        let xb = tree.elements[b].frame.midXVal + (stemUp ? halfW : -halfW)
                         // Interpolate y along main beam
                         let yMainA = tipYFirst + (tipYLast - tipYFirst) * ((xa - xStart) / max(1e-6, (xEnd - xStart)))
                         let yMainB = tipYFirst + (tipYLast - tipYFirst) * ((xb - xStart) / max(1e-6, (xEnd - xStart)))
@@ -323,8 +441,8 @@ public struct SimpleRenderer: ScoreRenderable {
                         ctx.strokePath()
                     }
                     if level >= 3 {
-                        let xa = tree.elements[a].frame.midXVal
-                        let xb = tree.elements[b].frame.midXVal
+                        let xa = tree.elements[a].frame.midXVal + (stemUp ? halfW : -halfW)
+                        let xb = tree.elements[b].frame.midXVal + (stemUp ? halfW : -halfW)
                         let yMainA = tipYFirst + (tipYLast - tipYFirst) * ((xa - xStart) / max(1e-6, (xEnd - xStart)))
                         let yMainB = tipYFirst + (tipYLast - tipYFirst) * ((xb - xStart) / max(1e-6, (xEnd - xStart)))
                         let y3a = stemUp ? yMainA - 8 : yMainA + 8
@@ -440,7 +558,7 @@ public struct SimpleRenderer: ScoreRenderable {
             switch e.base {
             case let .note(p, d):
                 if let cached = yCache[p] { y = cached }
-                else { let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y); yCache[p] = yy; y = yy }
+                else { let yy = yOffset(for: p, clef: options.clef, staffSpacing: options.staffSpacing, originY: origin.y); yCache[p] = yy; y = yy }
                 frame = CGRect(x: cursorX - 5, y: y - 5, width: 10, height: 10)
                 newElements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
             case .rest(_):
@@ -541,18 +659,37 @@ public struct SimpleRenderer: ScoreRenderable {
 
         // Beam groups/levels recomputed globally (fast enough N)
         let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
-        return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, ties: ties, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
+        var artMap: [Int: [Articulation]] = [:]
+        var dynMap: [Int: DynamicLevel] = [:]
+        var marks: [Int: LayoutMarks] = [:]
+        for idx in 0..<events.count {
+            if !events[idx].articulations.isEmpty { artMap[idx] = events[idx].articulations }
+            if let dyn = events[idx].dynamic { dynMap[idx] = dyn }
+            if events[idx].clefChange != nil || events[idx].keyChangeFifths != nil || events[idx].timeChange != nil {
+                let clef = events[idx].clefChange
+                let keyF = events[idx].keyChangeFifths
+                let t = events[idx].timeChange.map { ($0.beatsPerBar, $0.beatUnit) }
+                marks[idx] = LayoutMarks(clef: clef, keyFifths: keyF, time: t)
+            }
+        }
+        return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, ties: ties, articulations: artMap, dynamics: dynMap, marks: marks, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     // MARK: - Helpers
     // Very rough treble clef mapping: E4 on bottom line; middle C (C4) one ledger below.
-    private func trebleYOffset(for p: Pitch, staffSpacing: CGFloat, originY: CGFloat) -> CGFloat {
-        // Map semitone distance from C4 in diatonic steps for staff position approximation.
+    private func yOffset(for p: Pitch, clef: LayoutOptions.Clef, staffSpacing: CGFloat, originY: CGFloat) -> CGFloat {
         let stepIndex: Int
         switch p.step { case .C: stepIndex = 0; case .D: stepIndex = 1; case .E: stepIndex = 2; case .F: stepIndex = 3; case .G: stepIndex = 4; case .A: stepIndex = 5; case .B: stepIndex = 6 }
-        let diatonic = (p.octave - 4) * 7 + stepIndex // C4 = 0
-        // Each diatonic step = half a staff space (line/space). ledger below grows negative.
-        let c4Y = originY + staffSpacing * 5 // place C4 below staff by two spaces
+        let diatonic = (p.octave - 4) * 7 + stepIndex // relative to C4
+        let c4Y: CGFloat
+        switch clef {
+        case .treble:
+            // Approx: C4 one space below bottom line + a bit
+            c4Y = originY + staffSpacing * 5
+        case .bass:
+            // Approx: C4 one ledger above top line
+            c4Y = originY - staffSpacing
+        }
         let offset = -CGFloat(diatonic) * (staffSpacing / 2)
         return c4Y + offset
     }
@@ -565,6 +702,11 @@ public struct SimpleRenderer: ScoreRenderable {
         case 32: return 3
         default: return 0
         }
+    }
+
+    private func durationDen(for el: LayoutElement) -> Int {
+        if case let .note(_, d) = el.kind { return d.den }
+        return 4
     }
 
     private func beats(for e: NotatedEvent, beatUnit: Int) -> Int {
@@ -650,4 +792,228 @@ public struct SimpleRenderer: ScoreRenderable {
 extension CGRect {
     var midXVal: CGFloat { origin.x + size.width/2 }
     var midYVal: CGFloat { origin.y + size.height/2 }
+}
+
+// MARK: - SMuFL glyph helpers (clefs/accidentals)
+extension SimpleRenderer {
+    fileprivate func noteheadHalfWidth(staffSpacing: CGFloat) -> CGFloat { staffSpacing * 0.8 }
+    private var smuflFontCandidates: [String] { ["Bravura", "Petaluma", "Leland", "Emmentaler Text", "HelveticaNeue"] }
+
+    private func smuflFont(ofSize size: CGFloat) -> CTFont {
+        for name in smuflFontCandidates {
+            let font = CTFontCreateWithName(name as CFString, size, nil)
+            // Simple heuristic: if family name matches requested, accept
+            if CTFontGetSize(font) > 0 { return font }
+        }
+        return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
+    }
+
+    private func drawSMuFLText(_ ctx: CGContext, canvasHeight: CGFloat, text: String, at p: CGPoint, font: CTFont, alignCenter: Bool = false) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: CGColor(gray: 0.0, alpha: 1.0)
+        ]
+        let attr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attr)
+        ctx.saveGState()
+        ctx.textMatrix = .identity
+        // Flip to y-up for CoreText relative to our y-down canvas
+        ctx.translateBy(x: 0, y: canvasHeight)
+        ctx.scaleBy(x: 1, y: -1)
+        // Position: convert y-down p.y to y-up coordinates, with optional center alignment using glyph path bounds
+        var pos = CGPoint(x: p.x, y: canvasHeight - p.y)
+        if alignCenter {
+            let bounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
+            // Shift so that glyph center aligns to (p.x, p.y)
+            pos.x -= bounds.midX
+            pos.y -= bounds.midY
+        }
+        ctx.textPosition = pos
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+
+    private func drawTrebleClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
+        // SMuFL treble clef U+E050; fallback to Unicode 𝄞
+        let font = smuflFont(ofSize: staffSpacing * 4.6)
+        let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.8, y: origin.y + staffSpacing * 4.0)
+        let smuflClef = "\u{E050}"
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: smuflClef, at: clefPoint, font: font)
+    }
+
+    private func drawBassClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
+        // SMuFL bass clef U+E062
+        let font = smuflFont(ofSize: staffSpacing * 3.6)
+        let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.6, y: origin.y + staffSpacing * 2.0)
+        let smuflClef = "\u{E062}"
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: smuflClef, at: clefPoint, font: font)
+    }
+
+    private func drawKeySignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, clef: LayoutOptions.Clef, fifths: Int) {
+        guard fifths != 0 else { return }
+        let count = min(7, abs(fifths))
+        let isSharp = fifths > 0
+        let font = smuflFont(ofSize: staffSpacing * 1.3)
+        let glyph = isSharp ? "\u{E262}" : "\u{E260}"
+        // Approximate staff step positions for accidentals per clef
+        let trebleSharps = [8,5,9,6,3,7,4]
+        let trebleFlats  = [4,7,3,6,2,5,1]
+        let bassSharps   = [3,6,2,5,1,4,0]
+        let bassFlats    = [6,3,7,4,1,5,2]
+        let steps: [Int]
+        switch (clef, isSharp) {
+        case (.treble, true): steps = trebleSharps
+        case (.treble, false): steps = trebleFlats
+        case (.bass, true): steps = bassSharps
+        case (.bass, false): steps = bassFlats
+        }
+        let startX = origin.x + staffSpacing * 1.6
+        let xStep = staffSpacing * 0.9
+        for i in 0..<count {
+            let step = steps[i]
+            let y = origin.y + CGFloat(step) * (staffSpacing/2)
+            let x = startX + CGFloat(i) * xStep
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x, y: y), font: font)
+        }
+    }
+
+    private func timeSigGlyph(for digit: Int) -> String {
+        // SMuFL time signature digits 0..9 at U+E080..U+E089
+        let base: UInt32 = 0xE080
+        let code = base + UInt32(max(0, min(9, digit)))
+        return String(UnicodeScalar(code)!)
+    }
+
+    private func drawTimeSignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, time: (beatsPerBar: Int, beatUnit: Int)) {
+        let font = smuflFont(ofSize: staffSpacing * 2.2)
+        let x = origin.x + staffSpacing * 6.4
+        // Numerator on top, denominator below, roughly centered in staff
+        let numStr = String(time.beatsPerBar).compactMap { Int(String($0)) }
+        let denStr = String(time.beatUnit).compactMap { Int(String($0)) }
+        // Vertical anchors: center of staff
+        let centerY = origin.y + staffSpacing * 2
+        let numY = centerY - staffSpacing * 0.9
+        let denY = centerY + staffSpacing * 1.0
+        var advanceX: CGFloat = 0
+        for d in numStr {
+            let glyph = timeSigGlyph(for: d)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x + advanceX, y: numY), font: font, alignCenter: true)
+            advanceX += staffSpacing * 1.2
+        }
+        advanceX = 0
+        for d in denStr {
+            let glyph = timeSigGlyph(for: d)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x + advanceX, y: denY), font: font, alignCenter: true)
+            advanceX += staffSpacing * 1.2
+        }
+    }
+
+    private func drawRestSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
+        // Map duration to rest glyphs (approximate SMuFL code points)
+        let glyph: String
+        switch durationDen {
+        case 1: glyph = "\u{E4E3}" // whole rest
+        case 2: glyph = "\u{E4E4}" // half rest
+        case 4: glyph = "\u{E4E5}" // quarter rest
+        case 8: glyph = "\u{E4E6}" // 8th rest
+        case 16: glyph = "\u{E4E7}" // 16th rest
+        case 32: glyph = "\u{E4E8}" // 32nd rest
+        case 64: glyph = "\u{E4E9}" // 64th rest
+        default: glyph = "\u{E4E5}" // quarter as default
+        }
+        let font = smuflFont(ofSize: staffSpacing * 2.0)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+    }
+    private func drawAccidentalSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at p: CGPoint, alter: Int, staffSpacing: CGFloat) {
+        let font = smuflFont(ofSize: staffSpacing * 1.3)
+        let glyph: String
+        switch alter {
+        case 1: glyph = "\u{E262}" // sharp
+        case 2: glyph = "\u{E263}" // double-sharp
+        case -1: glyph = "\u{E260}" // flat
+        case -2: glyph = "\u{E264}" // double-flat
+        default: glyph = "\u{E261}" // natural
+        }
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: p, font: font)
+    }
+
+    private func drawDynamicsSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, level: DynamicLevel, staffSpacing: CGFloat) {
+        // SMuFL dynamics letters: m U+E521, p U+E520, f U+E522
+        let font = smuflFont(ofSize: staffSpacing * 1.6)
+        func glyph(for ch: Character) -> String {
+            switch ch {
+            case "m": return "\u{E521}"
+            case "p": return "\u{E520}"
+            case "f": return "\u{E522}"
+            default: return String(ch)
+            }
+        }
+        let sequence: [Character]
+        switch level {
+        case .pp: sequence = ["p","p"]
+        case .p:  sequence = ["p"]
+        case .mp: sequence = ["m","p"]
+        case .mf: sequence = ["m","f"]
+        case .f:  sequence = ["f"]
+        case .ff: sequence = ["f","f"]
+        }
+        // Center the entire dynamic string on 'center'
+        let advance = staffSpacing * 0.9
+        let totalWidth = advance * CGFloat(max(0, sequence.count - 1))
+        var x = center.x - totalWidth / 2
+        let y = center.y
+        for ch in sequence {
+            let g = glyph(for: ch)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: g, at: CGPoint(x: x, y: y), font: font, alignCenter: true)
+            x += advance
+        }
+    }
+
+    private func smuflNoteheadGlyph(forDen den: Int) -> String {
+        if den == 1 { return "\u{E0A2}" }     // whole
+        if den == 2 { return "\u{E0A3}" }     // half
+        return "\u{E0A4}"                     // black (quarter and shorter)
+    }
+
+    private func drawNoteheadSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
+        let glyph = smuflNoteheadGlyph(forDen: durationDen)
+        let font = smuflFont(ofSize: staffSpacing * 1.6)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+    }
+
+    private func noteheadHalfWidth(forDen den: Int, staffSpacing: CGFloat) -> CGFloat {
+        let glyph = smuflNoteheadGlyph(forDen: den)
+        let font = smuflFont(ofSize: staffSpacing * 1.6)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: glyph, attributes: attrs))
+        let bounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
+        let w = max(bounds.width, staffSpacing * 1.2) // ensure sane fallback
+        return w / 2
+    }
+
+    // MARK: - SMuFL flags
+    private func flagGlyph(for flags: Int, stemUp: Bool) -> String? {
+        // Map number of flags to SMuFL glyph (includes all tails in one glyph)
+        // Up: U+E240 (8th), U+E242 (16th), U+E244 (32nd), U+E246 (64th)
+        // Down: U+E241 (8th), U+E243 (16th), U+E245 (32nd), U+E247 (64th)
+        switch (flags, stemUp) {
+        case (1, true): return "\u{E240}"
+        case (2, true): return "\u{E242}"
+        case (3, true): return "\u{E244}"
+        case (4, true): return "\u{E246}"
+        case (1, false): return "\u{E241}"
+        case (2, false): return "\u{E243}"
+        case (3, false): return "\u{E245}"
+        case (4, false): return "\u{E247}"
+        default: return nil
+        }
+    }
+
+    private func drawFlagSMuFL(in ctx: CGContext, canvasHeight: CGFloat, atStemX x: CGFloat, stemTipY y: CGFloat, stemUp: Bool, flags: Int, staffSpacing: CGFloat) {
+        guard let glyph = flagGlyph(for: flags, stemUp: stemUp) else { return }
+        // Position the glyph so its attachment point meets the stem tip, approximate with slight offset
+        let font = smuflFont(ofSize: staffSpacing * 2.0)
+        let attachment = CGPoint(x: x + (stemUp ? 0.0 : 0.0), y: y + (stemUp ? 0.0 : 0.0))
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: attachment, font: font, alignCenter: false)
+    }
 }
