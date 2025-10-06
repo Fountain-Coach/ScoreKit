@@ -38,5 +38,32 @@ final class BeamGroupingTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(level01, 2)
         XCTAssertGreaterThanOrEqual(level12, 2)
     }
-}
 
+    func testCompoundSixEightGroups() {
+        // 6/8: group eighths by dotted quarter => two groups of three
+        let events: [NotatedEvent] = (0..<6).map { _ in
+            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8)))
+        }
+        let r = SimpleRenderer()
+        var opts = LayoutOptions(); opts.timeSignature = (6,8)
+        let tree = r.layout(events: events, in: CGRect(x: 0, y: 0, width: 400, height: 160), options: opts)
+        XCTAssertEqual(tree.beamGroups.count, 2)
+        XCTAssertEqual(tree.beamGroups[0], [0,1,2])
+        XCTAssertEqual(tree.beamGroups[1], [3,4,5])
+    }
+
+    func testCompoundTwelveEightGroups() {
+        // 12/8: four dotted-beat groups of three eighths
+        let evs: [NotatedEvent] = (0..<12).map { i in
+            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4 + (i/7)), duration: Duration(1,8)))
+        }
+        let r = SimpleRenderer()
+        var opts = LayoutOptions(); opts.timeSignature = (12,8)
+        let tree = r.layout(events: evs, in: CGRect(x: 0, y: 0, width: 800, height: 160), options: opts)
+        XCTAssertEqual(tree.beamGroups.count, 4)
+        XCTAssertEqual(tree.beamGroups[0], [0,1,2])
+        XCTAssertEqual(tree.beamGroups[1], [3,4,5])
+        XCTAssertEqual(tree.beamGroups[2], [6,7,8])
+        XCTAssertEqual(tree.beamGroups[3], [9,10,11])
+    }
+}

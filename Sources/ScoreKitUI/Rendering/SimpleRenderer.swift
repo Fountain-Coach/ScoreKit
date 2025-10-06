@@ -125,7 +125,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 }
             }
         }
-        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos)
+        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
         return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, ties: ties, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
@@ -273,45 +273,65 @@ public struct SimpleRenderer: ScoreRenderable {
             }
         }
 
-        // Draw beaming across consecutive eighth-or-shorter notes; break at beat boundaries
+        // Draw beaming across consecutive eighth-or-shorter notes; compound meters group by dotted beats
         var i = 0
         while i < tree.elements.count {
             guard case .note(_, let d) = tree.elements[i].kind, d.den >= 8 else { i += 1; continue }
-            let startBeat = floor(tree.beatPos[i])
+            let isCompound = (options.timeSignature.beatUnit == 8) && (options.timeSignature.beatsPerBar % 3 == 0)
+            let groupSize: Double = isCompound ? 3.0 : 1.0
+            let startGroup = isCompound ? Int(floor(((i == 0) ? 0.0 : tree.beatPos[i-1]) / groupSize)) : intBeatIndex(tree.beatPos[i])
             var j = i + 1
             var group: [Int] = [i]
             while j < tree.elements.count, case .note(_, let d2) = tree.elements[j].kind, d2.den >= 8 {
-                if floor(tree.beatPos[j]) != startBeat { break }
+                let gIdx = isCompound ? Int(floor(((j == 0) ? 0.0 : tree.beatPos[j-1]) / groupSize)) : intBeatIndex(tree.beatPos[j])
+                if gIdx != startGroup { break }
                 group.append(j)
                 j += 1
             }
             if group.count >= 2 {
-                let yBase = tree.elements[group.first!].frame.midYVal
-                let stemUp = yBase > (options.padding.height + options.staffSpacing * 2)
-                let y = stemUp ? (tree.elements[group.first!].frame.midYVal - 30) : (tree.elements[group.first!].frame.midYVal + 30)
+                // Slanted beam using stem tip of first/last notes
+                let stemLength: CGFloat = options.staffSpacing * 3.5
+                let first = tree.elements[group.first!]
+                let last = tree.elements[group.last!]
+                let middleY = (options.padding.height + options.staffSpacing * 2)
+                let stemUp = first.frame.midYVal > middleY
+                let tipYFirst = stemUp ? (first.frame.midYVal - stemLength) : (first.frame.midYVal + stemLength)
+                let tipYLast = stemUp ? (last.frame.midYVal - stemLength) : (last.frame.midYVal + stemLength)
                 ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
                 ctx.setLineWidth(3)
-                let xStart = tree.elements[group.first!].frame.midXVal
-                let xEnd = tree.elements[group.last!].frame.midXVal
-                ctx.move(to: CGPoint(x: xStart, y: y))
-                ctx.addLine(to: CGPoint(x: xEnd, y: y))
+                let xStart = first.frame.midXVal
+                let xEnd = last.frame.midXVal
+                ctx.move(to: CGPoint(x: xStart, y: tipYFirst))
+                ctx.addLine(to: CGPoint(x: xEnd, y: tipYLast))
                 ctx.strokePath()
                 // second/third beams between adjacent notes depending on duration levels
                 for k in 0..<(group.count - 1) {
                     let a = group[k]; let b = group[k+1]
                     let level = min(beamLevelFor(tree.elements[a]), beamLevelFor(tree.elements[b]))
                     if level >= 2 {
-                        let y2 = stemUp ? y - 4 : y + 4
+                        // Draw segment along slanted beam with offset
+                        let xa = tree.elements[a].frame.midXVal
+                        let xb = tree.elements[b].frame.midXVal
+                        // Interpolate y along main beam
+                        let yMainA = tipYFirst + (tipYLast - tipYFirst) * ((xa - xStart) / max(1e-6, (xEnd - xStart)))
+                        let yMainB = tipYFirst + (tipYLast - tipYFirst) * ((xb - xStart) / max(1e-6, (xEnd - xStart)))
+                        let y2a = stemUp ? yMainA - 4 : yMainA + 4
+                        let y2b = stemUp ? yMainB - 4 : yMainB + 4
                         ctx.setLineWidth(2)
-                        ctx.move(to: CGPoint(x: tree.elements[a].frame.midXVal, y: y2))
-                        ctx.addLine(to: CGPoint(x: tree.elements[b].frame.midXVal, y: y2))
+                        ctx.move(to: CGPoint(x: xa, y: y2a))
+                        ctx.addLine(to: CGPoint(x: xb, y: y2b))
                         ctx.strokePath()
                     }
                     if level >= 3 {
-                        let y3 = stemUp ? y - 8 : y + 8
+                        let xa = tree.elements[a].frame.midXVal
+                        let xb = tree.elements[b].frame.midXVal
+                        let yMainA = tipYFirst + (tipYLast - tipYFirst) * ((xa - xStart) / max(1e-6, (xEnd - xStart)))
+                        let yMainB = tipYFirst + (tipYLast - tipYFirst) * ((xb - xStart) / max(1e-6, (xEnd - xStart)))
+                        let y3a = stemUp ? yMainA - 8 : yMainA + 8
+                        let y3b = stemUp ? yMainB - 8 : yMainB + 8
                         ctx.setLineWidth(2)
-                        ctx.move(to: CGPoint(x: tree.elements[a].frame.midXVal, y: y3))
-                        ctx.addLine(to: CGPoint(x: tree.elements[b].frame.midXVal, y: y3))
+                        ctx.move(to: CGPoint(x: xa, y: y3a))
+                        ctx.addLine(to: CGPoint(x: xb, y: y3b))
                         ctx.strokePath()
                     }
                 }
@@ -520,7 +540,7 @@ public struct SimpleRenderer: ScoreRenderable {
         let newHeight = max(rect.height, prev.size.height)
 
         // Beam groups/levels recomputed globally (fast enough N)
-        let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos)
+        let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
         return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, ties: ties, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
@@ -580,20 +600,26 @@ public struct SimpleRenderer: ScoreRenderable {
         }
     }
 
-    private func computeBeams(elements: [LayoutElement], beatPos: [Double]) -> ([[Int]], [Int]) {
+    private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int) -> ([[Int]], [Int]) {
         var groups: [[Int]] = []
         var levels: [Int] = Array(repeating: 0, count: elements.count)
+        let isCompound = (beatUnit == 8) && (beatsPerBar % 3 == 0)
+        let groupSize: Double = isCompound ? 3.0 : 1.0 // units of eighth-beats when beatUnit=8
+
+        func compoundIndex(forStartPos pos: Double) -> Int { Int(floor(pos / groupSize)) }
+
         var i = 0
         while i < elements.count {
             guard i < beatPos.count else { break }
             guard case .note(_, let d) = elements[i].kind, d.den >= 8 else { i += 1; continue }
             levels[i] = beamLevelFor(elements[i])
-            let startBeat = intBeatIndex(beatPos[i])
+            let startGroup = isCompound ? compoundIndex(forStartPos: (i == 0 ? 0.0 : beatPos[i-1])) : intBeatIndex(beatPos[i])
             var j = i + 1
             var group: [Int] = [i]
             while j < elements.count, j < beatPos.count {
                 guard case .note(_, let d2) = elements[j].kind, d2.den >= 8 else { break }
-                if intBeatIndex(beatPos[j]) != startBeat { break }
+                let gj = isCompound ? compoundIndex(forStartPos: (j == 0 ? 0.0 : beatPos[j-1])) : intBeatIndex(beatPos[j])
+                if gj != startGroup { break }
                 levels[j] = beamLevelFor(elements[j])
                 group.append(j)
                 j += 1
