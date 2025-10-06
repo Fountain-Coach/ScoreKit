@@ -41,6 +41,23 @@ public final class CoreMIDISender {
             MIDISendEventList(outPort, dest, listPtr)
         }
     }
+
+    public func sendScheduledUMP(_ items: [(timeStamp: UInt64, words: [UInt32])], to index: Int = 0) {
+        guard destinationCount() > 0, !items.isEmpty else { return }
+        let dest = MIDIGetDestination(index)
+        let cap = max(1024, items.count * 64)
+        var storage = [UInt8](repeating: 0, count: cap)
+        storage.withUnsafeMutableBytes { raw in
+            let listPtr = raw.baseAddress!.assumingMemoryBound(to: MIDIEventList.self)
+            var packet = MIDIEventListInit(listPtr, ._2_0)
+            for it in items {
+                _ = it.words.withUnsafeBufferPointer { wbuf in
+                    MIDIEventListAdd(listPtr, cap, packet, it.timeStamp, wbuf.count, wbuf.baseAddress!)
+                }
+            }
+            MIDISendEventList(outPort, dest, listPtr)
+        }
+    }
 }
 
 #else

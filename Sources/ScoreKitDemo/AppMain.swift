@@ -142,16 +142,9 @@ struct DemoView: View {
                 }
                 Button("UMP → CoreMIDI (dest 0)") {
                     let engine = PlaybackEngine()
-                    let sink = CollectingSink()
-                    try? engine.schedule(events: events, channel: 0, tempo: Tempo(bpm: bpm), startTime: 0, sink: sink)
-                    let sender = CoreMIDISender()
-                    var scheduled: [(TimeInterval, [UInt32])] = []
-                    for it in sink.scheduled {
-                        let words = UMPEncoder.encode(it.message, group: 0, mode: .midi2_64bit)
-                        scheduled.append((it.time, words))
+                    if let sink = CoreMIDISink(destinationIndex: selectedDest) {
+                        try? engine.schedule(events: events, channel: 0, tempo: Tempo(bpm: bpm), startTime: 0, sink: sink)
                     }
-                    // Best-effort: send immediately ignoring schedule
-                    for (_, words) in scheduled { sender?.sendUMP(words: words, to: selectedDest) }
                 }
 #endif
             }
