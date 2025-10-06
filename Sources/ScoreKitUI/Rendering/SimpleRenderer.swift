@@ -21,12 +21,14 @@ public struct LayoutElement: Sendable {
 
 public struct LayoutSlur: Sendable { public let startIndex: Int; public let endIndex: Int }
 public struct LayoutHairpin: Sendable { public let startIndex: Int; public let endIndex: Int; public let crescendo: Bool }
+public struct LayoutTie: Sendable { public let startIndex: Int; public let endIndex: Int }
 
 public struct LayoutTree: Sendable {
     public let size: CGSize
     public let elements: [LayoutElement]
     public let slurs: [LayoutSlur]
     public let hairpins: [LayoutHairpin]
+    public let ties: [LayoutTie]
     public let barX: [CGFloat]
     public let beatPos: [Double]
     public let beamGroups: [[Int]]
@@ -51,6 +53,7 @@ public struct SimpleRenderer: ScoreRenderable {
         var elements: [LayoutElement] = []
         var slurs: [LayoutSlur] = []
         var hairpins: [LayoutHairpin] = []
+        var ties: [LayoutTie] = []
         var barX: [CGFloat] = []
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
         let optionsBarIndices = Set(options.barIndices)
@@ -110,8 +113,20 @@ public struct SimpleRenderer: ScoreRenderable {
                 }
             }
         }
+        // Build ties from events (match same pitch start/end)
+        for i in 0..<events.count {
+            if events[i].tieStart, case let .note(p, _) = events[i].base {
+                if let end = events[(i+1)...].firstIndex(where: { ev in
+                    guard ev.tieEnd else { return false }
+                    if case let .note(p2, _) = ev.base { return p2.step == p.step && p2.alter == p.alter && p2.octave == p.octave }
+                    return false
+                }) {
+                    ties.append(LayoutTie(startIndex: i, endIndex: end))
+                }
+            }
+        }
         let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos)
-        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
+        return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, ties: ties, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     public func draw(_ tree: LayoutTree, in ctx: CGContext, options: LayoutOptions) {
@@ -223,6 +238,39 @@ public struct SimpleRenderer: ScoreRenderable {
                 ctx.addLine(to: CGPoint(x: start.x, y: start.y + 6))
             }
             ctx.strokePath()
+        }
+
+        // Draw ties (shallow bezier near noteheads)
+        let middleY = (options.padding.height + options.staffSpacing * 2)
+        if !tree.elements.isEmpty {
+            for t in tree.ties {
+                guard t.startIndex < tree.elements.count, t.endIndex < tree.elements.count else { continue }
+                let a = tree.elements[t.startIndex].frame
+                let b = tree.elements[t.endIndex].frame
+                // Only draw if both are notes
+                switch (tree.elements[t.startIndex].kind, tree.elements[t.endIndex].kind) {
+                case (.note, .note):
+                    let above = a.midYVal <= middleY
+                    let y = above ? (min(a.minY, b.minY) - 6) : (max(a.maxY, b.maxY) + 6)
+                    let start = CGPoint(x: a.maxX + 2, y: y)
+                    let end = CGPoint(x: b.minX - 2, y: y)
+                    let ctrlLift: CGFloat = above ? -4 : 4
+                    let ctrl = CGPoint(x: (start.x + end.x)/2, y: y + ctrlLift)
+                    ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+                    ctx.setLineWidth(1)
+                    ctx.move(to: start)
+                    ctx.addQuadCurve(to: end, control: ctrl)
+                    ctx.strokePath()
+                    let ctrl2 = CGPoint(x: ctrl.x, y: ctrl.y + (above ? -1.2 : 1.2))
+                    let start2 = CGPoint(x: start.x, y: start.y + (above ? -1.0 : 1.0))
+                    let end2 = CGPoint(x: end.x, y: end.y + (above ? -1.0 : 1.0))
+                    ctx.move(to: start2)
+                    ctx.addQuadCurve(to: end2, control: ctrl2)
+                    ctx.strokePath()
+                default:
+                    continue
+                }
+            }
         }
 
         // Draw beaming across consecutive eighth-or-shorter notes; break at beat boundaries
@@ -438,12 +486,20 @@ public struct SimpleRenderer: ScoreRenderable {
         let suffixBars = prev.barX.filter { $0 > (prevEndNextX + eps) }.map { $0 + deltaX }
         newBarX.append(contentsOf: suffixBars)
 
-        // Slurs/hairpins: recompute globally (cheap) for correctness across boundaries
+        // Slurs/hairpins/ties: recompute globally (cheap) for correctness across boundaries
         var slurs: [LayoutSlur] = []
         var hairpins: [LayoutHairpin] = []
+        var ties: [LayoutTie] = []
         for i in 0..<events.count {
             if events[i].slurStart, let end = events[(i+1)...].firstIndex(where: { $0.slurEnd }) { slurs.append(LayoutSlur(startIndex: i, endIndex: end)) }
             if let hp = events[i].hairpinStart, let end = events[(i+1)...].firstIndex(where: { $0.hairpinEnd }) { hairpins.append(LayoutHairpin(startIndex: i, endIndex: end, crescendo: hp == .crescendo)) }
+            if events[i].tieStart, case let .note(p, _) = events[i].base {
+                if let end = events[(i+1)...].firstIndex(where: { ev in
+                    guard ev.tieEnd else { return false }
+                    if case let .note(p2, _) = ev.base { return p2.step == p.step && p2.alter == p.alter && p2.octave == p.octave }
+                    return false
+                }) { ties.append(LayoutTie(startIndex: i, endIndex: end)) }
+            }
         }
 
         // Compute size width by tracking final next-X
@@ -465,7 +521,7 @@ public struct SimpleRenderer: ScoreRenderable {
 
         // Beam groups/levels recomputed globally (fast enough N)
         let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos)
-        return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
+        return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, ties: ties, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
     // MARK: - Helpers
