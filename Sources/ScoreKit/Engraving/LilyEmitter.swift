@@ -1,6 +1,8 @@
 import Foundation
 
+#if ENABLE_LILYPOND
 /// Minimal LilyPond emitter for MVP/testing.
+@available(*, deprecated, message: "LilyPond path is deprecated. Use Engraving engine for rendering/serialization; keep Lily only for optional interop.")
 public enum LilyEmitter {
     /// Emit a simple score containing a single voice with given events.
     /// Durations map to Lily as `den` (1,2,4,8,16...).
@@ -56,55 +58,18 @@ public enum LilyEmitter {
         return lines.joined(separator: "\n")
     }
 
-    private static func ld(_ d: Duration) -> String {
-        // assume powers-of-two denominators common in Lily; fallback to 4
-        return String(d.den)
-    }
-
+    private static func ld(_ d: Duration) -> String { return String(d.den) }
     private static func lp(_ p: Pitch) -> String {
-        // Lily note names: c d e f g a b; sharps as 'is', flats as 'es'
         let base: String
-        switch p.step {
-        case .C: base = "c"
-        case .D: base = "d"
-        case .E: base = "e"
-        case .F: base = "f"
-        case .G: base = "g"
-        case .A: base = "a"
-        case .B: base = "b"
-        }
-        let acc: String = {
-            switch p.alter {
-            case 2: return "isis"
-            case 1: return "is"
-            case -1: return "es"
-            case -2: return "eses"
-            default: return ""
-            }
-        }()
-        // Middle C (C4) is c'; Lily uses ' for higher octaves, , for lower. Treat C4 as c'.
-        let octaveMarks: String = {
-            let rel = p.octave - 3 // Lily: middle C (C4) is c'
-            if rel > 0 { return String(repeating: "'", count: rel) }
-            if rel < 0 { return String(repeating: ",", count: -rel) }
-            return ""
-        }()
+        switch p.step { case .C: base = "c"; case .D: base = "d"; case .E: base = "e"; case .F: base = "f"; case .G: base = "g"; case .A: base = "a"; case .B: base = "b" }
+        let acc: String = { switch p.alter { case 2: return "isis"; case 1: return "is"; case -1: return "es"; case -2: return "eses"; default: return "" } }()
+        let rel = p.octave - 3
+        let octaveMarks = rel > 0 ? String(repeating: "'", count: rel) : (rel < 0 ? String(repeating: ",", count: -rel) : "")
         return base + acc + octaveMarks
     }
-
-    private static func articulationSuffix(_ a: Articulation) -> String {
-        switch a {
-        case .staccato: return "-."
-        case .accent: return "->"
-        case .marcato: return "-^"
-        case .tenuto: return "-_"
-        }
-    }
-
-    private static func hairpinStart(_ h: Hairpin) -> String {
-        switch h {
-        case .crescendo: return " \\<"
-        case .decrescendo: return " \\>"
-        }
-    }
+    private static func articulationSuffix(_ a: Articulation) -> String { switch a { case .staccato: return "-."; case .accent: return "->"; case .marcato: return "-^"; case .tenuto: return "-_" } }
+    private static func hairpinStart(_ h: Hairpin) -> String { switch h { case .crescendo: return " \\<"; case .decrescendo: return " \\>" } }
 }
+#else
+// LilyPond path disabled by default. Enable by defining ENABLE_LILYPOND in swiftSettings.
+#endif

@@ -14,11 +14,21 @@ let package = Package(
         .executable(name: "ScoreKitBench", targets: ["ScoreKitBench"]),
         .executable(name: "ScoreKitGif", targets: ["ScoreKitGif"]),
         .executable(name: "ScoreKitVid", targets: ["ScoreKitVid"]),
+        .executable(name: "ScoreKitSnap", targets: ["ScoreKitSnap"]),
+    ],
+    // Engraving engine (external) — declared for integration; not required for build here.
+    // Resolving this dependency is optional until ScoreKit begins importing its APIs.
+    dependencies: [
+        // .package(url: "https://github.com/Fountain-Coach/Engraving", branch: "main")
     ],
     targets: [
         .target(
             name: "ScoreKit",
-            path: "Sources/ScoreKit"
+            path: "Sources/ScoreKit",
+            swiftSettings: [
+                // LilyPond is deprecated and disabled by default. To enable, define ENABLE_LILYPOND.
+                // .define("ENABLE_LILYPOND")
+            ]
         ),
         .target(
             name: "ScoreKitUI",
@@ -54,6 +64,11 @@ let package = Package(
             name: "ScoreKitVid",
             dependencies: ["ScoreKitUI"],
             path: "Sources/ScoreKitVid"
+        ),
+        .executableTarget(
+            name: "ScoreKitSnap",
+            dependencies: ["ScoreKitUI"],
+            path: "Sources/ScoreKitSnap"
         ),
     ]
 )

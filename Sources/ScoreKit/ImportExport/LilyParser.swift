@@ -1,5 +1,7 @@
 import Foundation
 
+#if ENABLE_LILYPOND
+@available(*, deprecated, message: "LilyPond path is deprecated. Use Engraving engine; keep this for optional interop only.")
 public enum LilyParser {
     public static func parse(source: String) -> [NotatedEvent] {
         // Tokenize by whitespace, keep punctuation attached for simple cases.
@@ -133,6 +135,9 @@ public enum LilyParser {
         return (dur, hasStart, hasEnd, hasTie, arts)
     }
 }
+#else
+// LilyPond parser disabled by default. Enable with ENABLE_LILYPOND if needed for interop.
+#endif
 
 private extension Step {
     init(from ch: Character) {

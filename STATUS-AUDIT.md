@@ -3,8 +3,9 @@
 This document captures the current state of ScoreKit and the gaps to close so that "talking music" with AudioTalk yields immediate, faithful previews without manual editing.
 
 ## Summary
-- Strong base: single-staff renderer, incremental reflow (per-measure + neighbor-span spans), minimal AI preview flow, playback stub, Lily subset, demo assets, CI benches.
-- Priority gaps: compound meter beaming/slanted beams, ties rendering, CoreMIDI timestamped scheduling, multi-voice/staff, Lily coverage, semantics→playback depth, live AI streaming endpoint, visual tests.
+- Strong base: single-staff renderer, incremental reflow (per-measure + neighbor-span spans), minimal AI preview flow, playback stub, SMuFL rendering, demo assets, CI benches.
+- Strategy shift: Engraving package becomes the engraving authority. LilyPond is deprecated (interop only, disabled by default).
+- Priority gaps: compound meter beaming/slanted beams via Engraving, ties rendering polish, CoreMIDI timestamped scheduling, multi-voice/staff, semantics→playback depth, live AI streaming endpoint, visual tests.
 
 ## Current Capabilities (anchors)
 - Renderer
@@ -20,9 +21,11 @@ This document captures the current state of ScoreKit and the gaps to close so th
 - Playback
   - Schedule to abstract sink: `Sources/ScoreKit/Playback/PlaybackEngine.swift:11`
   - CoreMIDI sender (immediate): `Sources/ScoreKit/Playback/CoreMIDIPort.swift:30`
-- LilyPond
-  - Parser (subset): `Sources/ScoreKit/ImportExport/LilyParser.swift:3`
-  - Session/emit present (exec gated in tests)
+- Engraving / SMuFL
+  - Central SMuFL catalog + glyph usage in renderers: `Sources/ScoreKitUI/Rendering/SMuFLCatalog.swift:1`, `SimpleRenderer.swift:…`, `MultiRenderer.swift:…`
+- LilyPond (deprecated; interop only)
+  - Parser (subset, gated by `ENABLE_LILYPOND`): `Sources/ScoreKit/ImportExport/LilyParser.swift:1`
+  - Emitter (gated by `ENABLE_LILYPOND`): `Sources/ScoreKit/Engraving/LilyEmitter.swift:1`
 - Bench + CI
   - CI workflow + soft perf checks: `.github/workflows/ci.yml:1`
   - Bench: `swift run ScoreKitBench`
@@ -53,15 +56,12 @@ This document captures the current state of ScoreKit and the gaps to close so th
 - Keep ScoreView incremental; avoid heavy editor UI.
 
 ## P0 Backlog (next)
-1) Ties rendering (single voice)
-   - Add tie curves distinct from slurs; support ties across barlines.
-   - Files: `Sources/ScoreKitUI/Rendering/SimpleRenderer.swift`
-   - Accept: UI tests for ties over barlines; Lily round-trip retains ties.
-2) Compound meters + slanted beams
-   - Extend `computeBeams` for dotted beats (6/8, 9/8, 12/8); break on rests; tie-aware splits.
-   - Draw slanted beam lines; multi-level beam segments between stems.
-   - Files: `Sources/ScoreKitUI/Rendering/SimpleRenderer.swift:113, :224`
-   - Accept: new tests (6/8, rests in groups, ties across beats).
+1) Engraving integration: beaming + spacing API
+   - Replace local `computeBeams` with Engraving API; unify beam levels and groups across renderers.
+   - Accept: renderer snapshot tests for 6/8, 9/8, 12/8; rests and tie-aware splits.
+2) Ties rendering (single voice)
+   - Add tie curves distinct from slurs; support ties across barlines; refine placement.
+   - Accept: UI tests for ties over barlines.
 3) CoreMIDI JR timestamps
    - Map `ScheduledUMP.time` → host time; send via `MIDISendEventList` with JR timestamps.
    - Files: `Sources/ScoreKit/Playback/CoreMIDIPort.swift:30`, `Sources/ScoreKit/Playback/PlaybackEngine.swift:21`
@@ -75,7 +75,7 @@ This document captures the current state of ScoreKit and the gaps to close so th
 
 ## Hook-In Plan (tomorrow)
 - Branching: `feat/p0-<work>`, `fix/<bug>`, `test/<area>`.
-- Start with tests for each P0 item; iterate implement → test → bench.
+- Start with Engraving API adoption; then tests for each P0 item; iterate implement → test → bench.
 - Commands
   - Run tests: `swift test`
   - Bench: `swift run ScoreKitBench`
@@ -87,4 +87,3 @@ This document captures the current state of ScoreKit and the gaps to close so th
 ## Links
 - CI: https://github.com/Fountain-Coach/ScoreKit/actions/workflows/ci.yml
 - Demo assets: `Docs/scorekit-demo.gif`, `Docs/scorekit-demo.mp4`
-

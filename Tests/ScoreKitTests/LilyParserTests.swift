@@ -1,3 +1,5 @@
+// LilyPond interop tests — compile only when LilyPond is enabled
+#if ENABLE_LILYPOND
 import XCTest
 @testable import ScoreKit
 
@@ -39,3 +41,4 @@ final class LilyParserTests: XCTestCase {
             .replacingOccurrences(of: "}", with: "")
     }
 }
+#endif

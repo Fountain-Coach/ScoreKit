@@ -10,7 +10,7 @@ This document guides contributors and agents building ScoreKit — the notation 
   - `Tests/ScoreKit*/**`
 
 ## Mission
-- Unify professional engraving (LilyPond as source of truth) with Swift‑native, real‑time score rendering for interactive coaching, editing, and playback.
+- Unify professional engraving (Engraving engine as source of truth) with Swift‑native, real‑time score rendering for interactive coaching, editing, and playback.
 - Expose a stable Swift API and data model that AI (FountainAI), storage (Fountain‑Store), and audio (MIDI 2.0 / engines) can consume.
 
 ## Non‑Goals (for v0)
@@ -20,8 +20,8 @@ This document guides contributors and agents building ScoreKit — the notation 
 
 ## Architecture Overview
 - Core Data Model: immutable-ish score graph with persistent IDs (document, part, staff, measure, voice, event). Semantic annotations are first‑class.
-- Engraving Pipeline: LilyPond wrapper for publication‑quality output (PDF/SVG). LilyPond remains the canonical serialization.
-- Real‑Time Renderer: Swift renderer (CoreGraphics/SwiftUI) inspired by Verovio for immediate, incremental redraws and highlight/animation.
+- Engraving Engine: external `Fountain-Coach/Engraving` provides SMuFL glyph data/metrics, engraving rules (beaming, spacing, ties/slurs), and optional interop. Engraving becomes the canonical serialization/layout authority.
+- Real‑Time Renderer: Swift renderer (CoreGraphics/SwiftUI) inspired by Verovio for immediate, incremental redraws and highlight/animation; consumes Engraving primitives.
 - Semantics Layer: AudioTalk tags (`%!AudioTalk: ...`) and structured metadata enabling “speak music, hear it happen”.
 - I/O Gateways: Import (LilyPond subset, MusicXML/MEI if available), Export (LilyPond authoritative, SVG/PNG snapshots).
 - Integration: FountainAI (intents → ops), Fountain‑Store (versioned persistence/search), MIDI 2.0 engines (UMP per‑note playback), Teatro (UI/storyboards).
@@ -50,12 +50,11 @@ Constraints:
 
 ---
 
-## Engraving (LilyPond)
-- `LilySession` manages temp workdirs, `.ly` generation, process exec, stderr capture, and artifact collection (PDF/SVG/PNG).
-- macOS/Linux: runtime LilyPond usage if binary present. iOS: disable and fallback to native rendering.
-- CLI: non‑interactive flags, temp outputs, bounded runtime; capture diagnostics with measure/beat context.
-- Mapping: Model → Lily (idempotent, stable); Semantics → Lily as `%!AudioTalk:` comments; Lily → Model subset with passthrough for unknown blocks.
-- Snapshots: fixtures for `.ly` and tiny PDFs/SVGs under `Tests/Fixtures` with size limits.
+## Engraving Engine (External)
+- Source of truth for glyphs, metrics, engraving rules; exposed as a SwiftPM package dependency.
+- ScoreKit’s UI uses Engraving APIs for beaming groups/levels, key/clef/time layout, accidentals placement, and symbol glyphs.
+- LilyPond is deprecated for runtime/preview. It remains optional for import/export interop only and is disabled by default behind `ENABLE_LILYPOND`.
+- If Lily interop is needed, enable `ENABLE_LILYPOND` in `Package.swift` swiftSettings and run on macOS/Linux only.
 
 ---
 
@@ -84,8 +83,8 @@ Constraints:
 ---
 
 ## Import / Export
-- Export: LilyPond (canonical), SVG/PNG snapshots, JSON (model+semantics) for Fountain‑Store.
-- Import: Lily subset; MusicXML/MEI optional via feature flag.
+- Export: JSON (model+semantics) for Fountain‑Store; SVG/PNG snapshots via renderer; optional LilyPond (interop).
+- Import: optional Lily subset (interop); MusicXML/MEI optional via feature flag.
 
 ---
 
@@ -153,13 +152,12 @@ Constraints:
 
 ---
 
-## Milestones
 - M0 Bootstrap: Package scaffolding, core types, fixtures, CI.
-- M1 LilyPond Wrapper: `.ly` emit + CLI exec + error capture + tests.
+- M1 Engraving Integration: wire Engraving dependency; SMuFL catalog + metrics; basic beaming/spacing APIs consumed by renderer.
 - M2 Model Transforms: edits (slur, hairpin, articulation), diff/apply, semantics API.
 - M3 Renderer MVP: single‑staff layout + notes/rests + ties/slurs + basic dynamics; hit‑testing.
 - M4 Semantics→Playback: tags → UMP profiles; follow playhead.
-- M5 Import: Lily subset parser, round‑trip tests.
+- M5 Import (Interop): optional Lily subset parser & round‑trip tests (behind `ENABLE_LILYPOND`).
 - M6 UI: `ScoreView` SwiftUI with selection/highlighting; Teatro hooks.
 - M7 Performance: caches, incremental layout, benchmarks.
 - M8 Docs & Examples: playground app; end‑to‑end AudioTalk demo.
