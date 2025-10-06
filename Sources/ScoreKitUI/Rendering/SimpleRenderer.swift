@@ -377,13 +377,7 @@ public struct SimpleRenderer: ScoreRenderable {
             var x = el.frame.midXVal
             let font = smuflFont(ofSize: options.staffSpacing * 1.4)
             for (idx, a) in arts.enumerated() {
-                let glyph: String
-                switch a {
-                case .staccato: glyph = "\u{E4A2}"
-                case .tenuto: glyph = "\u{E4A4}"
-                case .accent: glyph = "\u{E4AC}"
-                case .marcato: glyph = "\u{E4AE}"
-                }
+                let glyph = SMuFL.articulationGlyph(a)
                 let y = baseY + (stemUp ? -CGFloat(idx) * (options.staffSpacing * 0.6) : CGFloat(idx) * (options.staffSpacing * 0.6))
                 drawSMuFLText(ctx, canvasHeight: tree.size.height, text: glyph, at: CGPoint(x: x, y: y), font: font, alignCenter: true)
                 x += options.staffSpacing * 0.9
@@ -797,15 +791,10 @@ extension CGRect {
 // MARK: - SMuFL glyph helpers (clefs/accidentals)
 extension SimpleRenderer {
     fileprivate func noteheadHalfWidth(staffSpacing: CGFloat) -> CGFloat { staffSpacing * 0.8 }
-    private var smuflFontCandidates: [String] { ["Bravura", "Petaluma", "Leland", "Emmentaler Text", "HelveticaNeue"] }
+    private var smuflFontCandidates: [String] { SMuFL.fontCandidates }
 
     private func smuflFont(ofSize size: CGFloat) -> CTFont {
-        for name in smuflFontCandidates {
-            let font = CTFontCreateWithName(name as CFString, size, nil)
-            // Simple heuristic: if family name matches requested, accept
-            if CTFontGetSize(font) > 0 { return font }
-        }
-        return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
+        return SMuFL.font(ofSize: size)
     }
 
     private func drawSMuFLText(_ ctx: CGContext, canvasHeight: CGFloat, text: String, at p: CGPoint, font: CTFont, alignCenter: Bool = false) {
@@ -834,19 +823,15 @@ extension SimpleRenderer {
     }
 
     private func drawTrebleClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        // SMuFL treble clef U+E050; fallback to Unicode 𝄞
         let font = smuflFont(ofSize: staffSpacing * 4.6)
         let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.8, y: origin.y + staffSpacing * 4.0)
-        let smuflClef = "\u{E050}"
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: smuflClef, at: clefPoint, font: font)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: clefPoint, font: font)
     }
 
     private func drawBassClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        // SMuFL bass clef U+E062
         let font = smuflFont(ofSize: staffSpacing * 3.6)
         let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.6, y: origin.y + staffSpacing * 2.0)
-        let smuflClef = "\u{E062}"
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: smuflClef, at: clefPoint, font: font)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.bassClef, at: clefPoint, font: font)
     }
 
     private func drawKeySignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, clef: LayoutOptions.Clef, fifths: Int) {
@@ -878,10 +863,7 @@ extension SimpleRenderer {
     }
 
     private func timeSigGlyph(for digit: Int) -> String {
-        // SMuFL time signature digits 0..9 at U+E080..U+E089
-        let base: UInt32 = 0xE080
-        let code = base + UInt32(max(0, min(9, digit)))
-        return String(UnicodeScalar(code)!)
+        return SMuFL.timeSigGlyph(digit: digit)
     }
 
     private func drawTimeSignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, time: (beatsPerBar: Int, beatUnit: Int)) {
@@ -909,70 +891,30 @@ extension SimpleRenderer {
     }
 
     private func drawRestSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
-        // Map duration to rest glyphs (approximate SMuFL code points)
-        let glyph: String
-        switch durationDen {
-        case 1: glyph = "\u{E4E3}" // whole rest
-        case 2: glyph = "\u{E4E4}" // half rest
-        case 4: glyph = "\u{E4E5}" // quarter rest
-        case 8: glyph = "\u{E4E6}" // 8th rest
-        case 16: glyph = "\u{E4E7}" // 16th rest
-        case 32: glyph = "\u{E4E8}" // 32nd rest
-        case 64: glyph = "\u{E4E9}" // 64th rest
-        default: glyph = "\u{E4E5}" // quarter as default
-        }
         let font = smuflFont(ofSize: staffSpacing * 2.0)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.restGlyph(forDen: durationDen), at: center, font: font, alignCenter: true)
     }
     private func drawAccidentalSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at p: CGPoint, alter: Int, staffSpacing: CGFloat) {
         let font = smuflFont(ofSize: staffSpacing * 1.3)
-        let glyph: String
-        switch alter {
-        case 1: glyph = "\u{E262}" // sharp
-        case 2: glyph = "\u{E263}" // double-sharp
-        case -1: glyph = "\u{E260}" // flat
-        case -2: glyph = "\u{E264}" // double-flat
-        default: glyph = "\u{E261}" // natural
-        }
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: p, font: font)
+        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.accidentalGlyph(for: alter), at: p, font: font)
     }
 
     private func drawDynamicsSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, level: DynamicLevel, staffSpacing: CGFloat) {
-        // SMuFL dynamics letters: m U+E521, p U+E520, f U+E522
         let font = smuflFont(ofSize: staffSpacing * 1.6)
-        func glyph(for ch: Character) -> String {
-            switch ch {
-            case "m": return "\u{E521}"
-            case "p": return "\u{E520}"
-            case "f": return "\u{E522}"
-            default: return String(ch)
-            }
-        }
-        let sequence: [Character]
-        switch level {
-        case .pp: sequence = ["p","p"]
-        case .p:  sequence = ["p"]
-        case .mp: sequence = ["m","p"]
-        case .mf: sequence = ["m","f"]
-        case .f:  sequence = ["f"]
-        case .ff: sequence = ["f","f"]
-        }
+        let glyphs = SMuFL.dynamicsGlyphs(for: level)
         // Center the entire dynamic string on 'center'
         let advance = staffSpacing * 0.9
-        let totalWidth = advance * CGFloat(max(0, sequence.count - 1))
+        let totalWidth = advance * CGFloat(max(0, glyphs.count - 1))
         var x = center.x - totalWidth / 2
         let y = center.y
-        for ch in sequence {
-            let g = glyph(for: ch)
+        for g in glyphs {
             drawSMuFLText(ctx, canvasHeight: canvasHeight, text: g, at: CGPoint(x: x, y: y), font: font, alignCenter: true)
             x += advance
         }
     }
 
     private func smuflNoteheadGlyph(forDen den: Int) -> String {
-        if den == 1 { return "\u{E0A2}" }     // whole
-        if den == 2 { return "\u{E0A3}" }     // half
-        return "\u{E0A4}"                     // black (quarter and shorter)
+        return SMuFL.noteheadGlyph(forDen: den)
     }
 
     private func drawNoteheadSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
@@ -993,20 +935,7 @@ extension SimpleRenderer {
 
     // MARK: - SMuFL flags
     private func flagGlyph(for flags: Int, stemUp: Bool) -> String? {
-        // Map number of flags to SMuFL glyph (includes all tails in one glyph)
-        // Up: U+E240 (8th), U+E242 (16th), U+E244 (32nd), U+E246 (64th)
-        // Down: U+E241 (8th), U+E243 (16th), U+E245 (32nd), U+E247 (64th)
-        switch (flags, stemUp) {
-        case (1, true): return "\u{E240}"
-        case (2, true): return "\u{E242}"
-        case (3, true): return "\u{E244}"
-        case (4, true): return "\u{E246}"
-        case (1, false): return "\u{E241}"
-        case (2, false): return "\u{E243}"
-        case (3, false): return "\u{E245}"
-        case (4, false): return "\u{E247}"
-        default: return nil
-        }
+        return SMuFL.flagGlyph(flags: flags, stemUp: stemUp)
     }
 
     private func drawFlagSMuFL(in ctx: CGContext, canvasHeight: CGFloat, atStemX x: CGFloat, stemTipY y: CGFloat, stemUp: Bool, flags: Int, staffSpacing: CGFloat) {
