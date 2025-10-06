@@ -54,6 +54,7 @@ public protocol ScoreRenderable {
 }
 
 public struct SimpleRenderer: ScoreRenderable {
+    private let rules = RulesService()
     public init() {}
 
     public func layout(events: [NotatedEvent], in rect: CGRect, options: LayoutOptions) -> LayoutTree {
@@ -221,12 +222,18 @@ public struct SimpleRenderer: ScoreRenderable {
             if let t = mark.time { drawTimeSignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: CGPoint(x: x, y: options.padding.height), staffSpacing: options.staffSpacing, time: t) }
         }
 
-        // Draw dynamics glyphs at events with dynamics
+        // Draw dynamics glyphs at events with dynamics (apply kerning offsets if available)
         for (idx, dyn) in tree.dynamics {
             guard idx < tree.elements.count else { continue }
             let el = tree.elements[idx]
             let y = max(el.frame.maxY + options.staffSpacing * 1.4, options.padding.height + options.staffSpacing * 2.2)
-            drawDynamicsSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal, y: y), level: dyn, staffSpacing: options.staffSpacing)
+            // Compute a simple dynamic bbox around the nominal position; hairpin context omitted in this basic pass
+            let dynRect = CGRect(x: el.frame.midXVal - options.staffSpacing * 0.6,
+                                 y: y - options.staffSpacing * 0.6,
+                                 width: options.staffSpacing * 1.2,
+                                 height: options.staffSpacing * 1.2)
+            let k = rules.kerningOffset(dynamicRect: dynRect, hairpinRect: nil)
+            drawDynamicsSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal + k.x, y: y + k.y), level: dyn, staffSpacing: options.staffSpacing)
         }
 
         // Ledger lines for notes beyond staff
