@@ -326,6 +326,8 @@ public struct SimpleRenderer: ScoreRenderable {
             // Optional slope from RulesKit (computed on note positions in staff spaces)
             var slope: CGFloat? = nil
             if let endpointStr = ProcessInfo.processInfo.environment["RULES_ENDPOINT"], let endpointURL = URL(string: endpointStr) {
+                final class SlopeBox { var value: CGFloat? = nil }
+                let box = SlopeBox()
                 var positionsSP: [Double] = []
                 var stems: [Components.Schemas.BeamGeometryInput.stemDirectionsPayloadPayload] = []
                 let centerY = options.padding.height + options.staffSpacing * 2
@@ -344,21 +346,20 @@ public struct SimpleRenderer: ScoreRenderable {
                 let input = Operations.RULE_period_Beaming_period_geometry_slope_and_segments.Input(body: .json(.init(notePositionsSP: positionsSP, stemDirections: stems, beamThicknessSP: thickness)))
                 let transport = URLSessionTransport()
                 let client = RulesKit.Client(serverURL: endpointURL, transport: transport)
-                var s: CGFloat?
                 let sema = DispatchSemaphore(value: 0)
                 Task {
                     defer { sema.signal() }
                     do {
                         let out = try await client.RULE_period_Beaming_period_geometry_slope_and_segments(input)
                         if case let .ok(ok) = out, case let .json(obj) = ok.body {
-                            s = CGFloat(obj.slopeSPPerSpace)
+                            box.value = CGFloat(obj.slopeSPPerSpace)
                         }
                     } catch {
                         // ignore
                     }
                 }
                 _ = sema.wait(timeout: .now() + .milliseconds(max(1, options.rulesBeamingGeometryBudgetMS)))
-                slope = s
+                slope = box.value
             }
 
             // Beam parameters

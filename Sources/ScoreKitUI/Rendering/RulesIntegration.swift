@@ -20,6 +20,8 @@ struct RulesService {
 
     // Dynamic kerning with optional hairpin/lyrics context.
     func kerningOffset(dynamicRect: CGRect, hairpinRect: CGRect?, staffSpacing: CGFloat, budgetMS: Int) -> CGPoint {
+        final class KerningBox { var value: CGPoint? = nil }
+        let box = KerningBox()
         // Try typed OpenAPI client first (if endpoint set), with a short synchronous wait.
         if let endpoint {
             // Convert point units to StaffSpace by dividing by staffSpacing.
@@ -35,25 +37,22 @@ struct RulesService {
             let input = Operations.RULE_period_DynamicAlign_period_kerning_with_hairpins.Input(body: .json(payload))
             let transport = URLSessionTransport()
             let client = RulesKit.Client(serverURL: endpoint, transport: transport)
-            var resultPoint: CGPoint = .zero
-            var got = false
             let sema = DispatchSemaphore(value: 0)
             Task {
                 defer { sema.signal() }
                 do {
                     let out = try await client.RULE_period_DynamicAlign_period_kerning_with_hairpins(input)
                     if case let .ok(ok) = out, case let .json(obj) = ok.body {
-                        // Convert back to point units
-                        resultPoint = CGPoint(x: CGFloat(obj.dynamicPosition.x) * staffSpacing,
-                                              y: CGFloat(obj.dynamicPosition.y) * staffSpacing)
-                        got = true
+                        let p = CGPoint(x: CGFloat(obj.dynamicPosition.x) * staffSpacing,
+                                         y: CGFloat(obj.dynamicPosition.y) * staffSpacing)
+                        box.value = p
                     }
                 } catch {
                     // ignore; fall back
                 }
             }
             _ = sema.wait(timeout: .now() + .milliseconds(max(1, budgetMS)))
-            if got { return resultPoint }
+            if let p = box.value { return p }
         }
         // Heuristic fallback: small rightward nudge, keep baseline
         return CGPoint(x: max(0, dynamicRect.width * 0.05), y: 0)
@@ -76,30 +75,36 @@ struct RulesService {
         let payloadRest = Components.Schemas.RestSplitInput(sequence: seq)
         let inputRest = Operations.RULE_period_Beaming_period_rests_split_groups.Input(body: .json(payloadRest))
 
-        var breaks: Set<Int>? = nil
-        var restGroups: [[Int]]? = nil
+        final class BeamBox { var breaks: Set<Int>? = nil; var rest: [[Int]]? = nil }
+        let box = BeamBox()
+
         let sema = DispatchSemaphore(value: 0)
-        // Fire both requests in parallel and wait up to budgetMS total.
         Task {
-            defer { sema.signal() }
-            async let a: Void = {
+            async let br: Set<Int>? = {
                 do {
                     let out = try await client.RULE_period_Beaming_period_subdivision_preference(inputSub)
-                    if case let .ok(ok) = out, case let .json(obj) = ok.body { breaks = Set(obj.beamBreaks) }
+                    if case let .ok(ok) = out, case let .json(obj) = ok.body { return Set(obj.beamBreaks) }
                 } catch {}
+                return nil
             }()
-            async let b: Void = {
+            async let rg: [[Int]]? = {
                 do {
                     let out = try await client.RULE_period_Beaming_period_rests_split_groups(inputRest)
-                    if case let .ok(ok) = out, case let .json(obj) = ok.body { restGroups = obj.groups }
+                    if case let .ok(ok) = out, case let .json(obj) = ok.body { return obj.groups }
                 } catch {}
+                return nil
             }()
-            _ = await (a, b)
+            let (b, r) = await (br, rg)
+            box.breaks = b
+            box.rest = r
+            sema.signal()
         }
         _ = sema.wait(timeout: .now() + .milliseconds(max(1, budgetMS)))
 
+        let br = box.breaks
+        let rg = box.rest
         // Prefer combination if both available
-        if let rg = restGroups, let br = breaks {
+        if let rg = rg, let br = br {
             var groups: [[Int]] = []
             for g in rg {
                 var current: [Int] = []
@@ -114,7 +119,7 @@ struct RulesService {
             if !groups.isEmpty { return groups }
         }
         // Else choose whichever arrived
-        if let br = breaks {
+        if let br = br {
             var groups: [[Int]] = []
             var current: [Int] = []
             for i in 0..<isNote.count {
@@ -126,7 +131,7 @@ struct RulesService {
             if current.count >= 2 { groups.append(current) }
             if !groups.isEmpty { return groups }
         }
-        if let rg = restGroups {
+        if let rg = rg {
             // Filter only beamable indices and drop tiny groups
             let filtered = rg.map { $0.filter { isNote[$0] && denoms[$0] >= 8 } }.filter { $0.count >= 2 }
             if !filtered.isEmpty { return filtered }
