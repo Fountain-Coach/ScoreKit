@@ -951,9 +951,8 @@ extension SimpleRenderer {
     fileprivate func noteheadHalfWidth(staffSpacing: CGFloat) -> CGFloat { staffSpacing * 0.8 }
     private var smuflFontCandidates: [String] { SMuFL.fontCandidates }
 
-    private func smuflFont(ofSize size: CGFloat) -> CTFont {
-        return SMuFL.font(ofSize: size)
-    }
+    private func smuflFont(ofSize size: CGFloat) -> CTFont { SMuFL.font(ofSize: size) }
+    private func systemFont(ofSize size: CGFloat) -> CTFont { CTFontCreateWithName("HelveticaNeue" as CFString, size, nil) }
 
     private func drawSMuFLText(_ ctx: CGContext, canvasHeight: CGFloat, text: String, at p: CGPoint, font: CTFont, alignCenter: Bool = false) {
         let attrs: [NSAttributedString.Key: Any] = [
@@ -981,23 +980,33 @@ extension SimpleRenderer {
     }
 
     private func drawTrebleClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        let font = smuflFont(ofSize: staffSpacing * 4.6)
         let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.8, y: origin.y + staffSpacing * 4.0)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: clefPoint, font: font)
+        if SMuFL.isAvailable {
+            let font = smuflFont(ofSize: staffSpacing * 4.6)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: clefPoint, font: font)
+        } else {
+            let font = systemFont(ofSize: staffSpacing * 2.6)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "G", at: clefPoint, font: font)
+        }
     }
 
     private func drawBassClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        let font = smuflFont(ofSize: staffSpacing * 3.6)
         let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.6, y: origin.y + staffSpacing * 2.0)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.bassClef, at: clefPoint, font: font)
+        if SMuFL.isAvailable {
+            let font = smuflFont(ofSize: staffSpacing * 3.6)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.bassClef, at: clefPoint, font: font)
+        } else {
+            let font = systemFont(ofSize: staffSpacing * 2.2)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "F", at: clefPoint, font: font)
+        }
     }
 
     private func drawKeySignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, clef: LayoutOptions.Clef, fifths: Int) {
         guard fifths != 0 else { return }
         let count = min(7, abs(fifths))
         let isSharp = fifths > 0
-        let font = smuflFont(ofSize: staffSpacing * 1.3)
-        let glyph = SMuFL.accidentalGlyph(for: isSharp ? 1 : -1)
+        let font = SMuFL.isAvailable ? smuflFont(ofSize: staffSpacing * 1.3) : systemFont(ofSize: staffSpacing * 1.3)
+        let glyph = SMuFL.isAvailable ? SMuFL.accidentalGlyph(for: isSharp ? 1 : -1) : (isSharp ? "#" : "b")
         let steps = SMuFL.keySignatureSteps(clef: clef, isSharp: isSharp)
         let startX = origin.x + staffSpacing * 1.6
         let xStep = staffSpacing * 0.9
@@ -1014,7 +1023,7 @@ extension SimpleRenderer {
     }
 
     private func drawTimeSignatureSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat, time: (beatsPerBar: Int, beatUnit: Int)) {
-        let font = smuflFont(ofSize: staffSpacing * 2.2)
+        let font = SMuFL.isAvailable ? smuflFont(ofSize: staffSpacing * 2.2) : systemFont(ofSize: staffSpacing * 2.2)
         let x = origin.x + staffSpacing * 6.4
         // Numerator on top, denominator below, roughly centered in staff
         let numStr = String(time.beatsPerBar).compactMap { Int(String($0)) }
@@ -1025,30 +1034,51 @@ extension SimpleRenderer {
         let denY = centerY + staffSpacing * 1.0
         var advanceX: CGFloat = 0
         for d in numStr {
-            let glyph = timeSigGlyph(for: d)
+            let glyph = SMuFL.isAvailable ? timeSigGlyph(for: d) : String(d)
             drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x + advanceX, y: numY), font: font, alignCenter: true)
             advanceX += staffSpacing * 1.2
         }
         advanceX = 0
         for d in denStr {
-            let glyph = timeSigGlyph(for: d)
+            let glyph = SMuFL.isAvailable ? timeSigGlyph(for: d) : String(d)
             drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: CGPoint(x: x + advanceX, y: denY), font: font, alignCenter: true)
             advanceX += staffSpacing * 1.2
         }
     }
 
     private func drawRestSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
-        let font = smuflFont(ofSize: staffSpacing * 2.0)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.restGlyph(forDen: durationDen), at: center, font: font, alignCenter: true)
+        if SMuFL.isAvailable {
+            let font = smuflFont(ofSize: staffSpacing * 2.0)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.restGlyph(forDen: durationDen), at: center, font: font, alignCenter: true)
+        } else {
+            // Simple rectangle rest approximation
+            let w = staffSpacing * 1.2
+            let h = staffSpacing * 0.4
+            let rect = CGRect(x: center.x - w/2, y: center.y - h/2, width: w, height: h)
+            ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
+            ctx.fill(rect)
+        }
     }
     private func drawAccidentalSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at p: CGPoint, alter: Int, staffSpacing: CGFloat) {
-        let font = smuflFont(ofSize: staffSpacing * 1.3)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.accidentalGlyph(for: alter), at: p, font: font)
+        if SMuFL.isAvailable {
+            let font = smuflFont(ofSize: staffSpacing * 1.3)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.accidentalGlyph(for: alter), at: p, font: font)
+        } else {
+            let font = systemFont(ofSize: staffSpacing * 1.2)
+            let text: String
+            switch alter { case 2: text = "x"; case 1: text = "#"; case -1: text = "b"; case -2: text = "bb"; default: text = "\u{266E}" }
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: text, at: p, font: font)
+        }
     }
 
     private func drawDynamicsSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, level: DynamicLevel, staffSpacing: CGFloat) {
-        let font = smuflFont(ofSize: staffSpacing * 1.6)
-        let glyphs = SMuFL.dynamicsGlyphs(for: level)
+        let font = SMuFL.isAvailable ? smuflFont(ofSize: staffSpacing * 1.6) : systemFont(ofSize: staffSpacing * 1.6)
+        let glyphs: [String]
+        if SMuFL.isAvailable {
+            glyphs = SMuFL.dynamicsGlyphs(for: level)
+        } else {
+            glyphs = SMuFL.dynamicsASCII(for: level).map { String($0) }
+        }
         // Center the entire dynamic string on 'center'
         let advance = staffSpacing * 0.9
         let totalWidth = advance * CGFloat(max(0, glyphs.count - 1))
@@ -1065,9 +1095,29 @@ extension SimpleRenderer {
     }
 
     private func drawNoteheadSMuFL(in ctx: CGContext, canvasHeight: CGFloat, at center: CGPoint, durationDen: Int, staffSpacing: CGFloat) {
-        let glyph = smuflNoteheadGlyph(forDen: durationDen)
-        let font = smuflFont(ofSize: staffSpacing * 1.6)
-        drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+        if SMuFL.isAvailable {
+            let glyph = smuflNoteheadGlyph(forDen: durationDen)
+            let font = smuflFont(ofSize: staffSpacing * 1.6)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: glyph, at: center, font: font, alignCenter: true)
+        } else {
+            // Draw simple elliptical notehead; filled for black notes, hollow for whole/half
+            let w = staffSpacing * 1.6
+            let h = staffSpacing * 1.2
+            let rect = CGRect(x: center.x - w/2, y: center.y - h/2, width: w, height: h)
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.rotate(by: -0.25)
+            ctx.translateBy(x: -center.x, y: -center.y)
+            if durationDen <= 2 {
+                ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
+                ctx.setLineWidth(1)
+                ctx.strokeEllipse(in: rect)
+            } else {
+                ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
+                ctx.fillEllipse(in: rect)
+            }
+            ctx.restoreGState()
+        }
     }
 
     private func noteheadHalfWidth(forDen den: Int, staffSpacing: CGFloat) -> CGFloat {
@@ -1082,6 +1132,7 @@ extension SimpleRenderer {
 
     // MARK: - SMuFL flags
     private func flagGlyph(for flags: Int, stemUp: Bool) -> String? {
+        guard SMuFL.isAvailable else { return nil }
         return SMuFL.flagGlyph(flags: flags, stemUp: stemUp)
     }
 

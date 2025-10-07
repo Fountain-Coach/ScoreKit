@@ -10,11 +10,29 @@ public enum SMuFL {
     ]
 
     public static func font(ofSize size: CGFloat) -> CTFont {
+        if let f = smuflFont(ofSize: size) { return f }
+        return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
+    }
+
+    // Detect presence of a SMuFL-capable font by ensuring a common code point exists (treble clef U+E050).
+    public static let isAvailable: Bool = {
+        return smuflFont(ofSize: 12) != nil
+    }()
+
+    private static func smuflFont(ofSize size: CGFloat) -> CTFont? {
+        let testScalar: UniChar = 0xE050
         for name in fontCandidates {
             let font = CTFontCreateWithName(name as CFString, size, nil)
-            if CTFontGetSize(font) > 0 { return font }
+            var ch = testScalar
+            var glyph: CGGlyph = 0
+            withUnsafePointer(to: &ch) { chPtr in
+                withUnsafeMutablePointer(to: &glyph) { gPtr in
+                    _ = CTFontGetGlyphsForCharacters(font, chPtr, gPtr, 1)
+                }
+            }
+            if glyph != 0 { return font }
         }
-        return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
+        return nil
     }
 
     // Clefs
@@ -37,6 +55,18 @@ public enum SMuFL {
         let base: UInt32 = 0xE080
         let code = base + UInt32(max(0, min(9, digit)))
         return String(UnicodeScalar(code)!)
+    }
+
+    // ASCII fallback for dynamics
+    public static func dynamicsASCII(for level: DynamicLevel) -> String {
+        switch level {
+        case .pp: return "pp"
+        case .p:  return "p"
+        case .mp: return "mp"
+        case .mf: return "mf"
+        case .f:  return "f"
+        case .ff: return "ff"
+        }
     }
 
     // Dynamics
