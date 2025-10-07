@@ -15,6 +15,9 @@ func makeContext(size: CGSize) -> CGContext {
     let bytesPerRow = Int(size.width) * 4
     let ctx = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     ctx.interpolationQuality = .high
+    // Fill a white background so our black strokes are visible in PNGs
+    ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
+    ctx.fill(CGRect(origin: .zero, size: size))
     return ctx
 }
 
