@@ -187,4 +187,157 @@ do {
     else { snapDynamics(suffix: "offline", endpoint: nil) }
 }
 
+// Snapshot 4: Ode to Joy (excerpt) — C major, 4/4
+do {
+    func snapOdeToJoy(suffix: String, endpoint: URL?) {
+        // Melody (one phrase), quarter grid with a couple of slurs
+        let seq: [(Pitch, Int)] = [
+            (Pitch(step: .E, alter: 0, octave: 4), 4), (Pitch(step: .E, alter: 0, octave: 4), 4),
+            (Pitch(step: .F, alter: 0, octave: 4), 4), (Pitch(step: .G, alter: 0, octave: 4), 4),
+            (Pitch(step: .G, alter: 0, octave: 4), 4), (Pitch(step: .F, alter: 0, octave: 4), 4),
+            (Pitch(step: .E, alter: 0, octave: 4), 4), (Pitch(step: .D, alter: 0, octave: 4), 4),
+            (Pitch(step: .C, alter: 0, octave: 4), 4), (Pitch(step: .C, alter: 0, octave: 4), 4),
+            (Pitch(step: .D, alter: 0, octave: 4), 4), (Pitch(step: .E, alter: 0, octave: 4), 4),
+            (Pitch(step: .E, alter: 0, octave: 4), 2), (Pitch(step: .D, alter: 0, octave: 4), 2)
+        ]
+        var events: [NotatedEvent] = []
+        for (i, it) in seq.enumerated() {
+            let dur = Duration(1, it.1)
+            var e = NotatedEvent(base: .note(pitch: it.0, duration: dur))
+            // simple slurs over {E F G} and later {C D E}
+            if i == 0 { e.slurStart = true }
+            if i == 3 { e.slurEnd = true }
+            if i == 8 { e.slurStart = true }
+            if i == 11 { e.slurEnd = true }
+            events.append(e)
+        }
+        // add a light dynamic start
+        events[0].dynamic = .mp
+
+        let size = CGSize(width: 800, height: 220)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+        let tree = renderer.layout(events: events, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let role = suffix.isEmpty ? "offline" : suffix
+        let name = "ode_to_joy_excerpt.\(role).\(SNAP_TAG).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "ode_to_joy_excerpt", events: events)
+    }
+    if let url = envEndpoint() { snapOdeToJoy(suffix: "offline", endpoint: nil); snapOdeToJoy(suffix: "rules", endpoint: url) }
+    else { snapOdeToJoy(suffix: "offline", endpoint: nil) }
+}
+
+// Snapshot 5: Etude in 6/8 — dotted-beat grouping, rest split
+do {
+    func snapEtudeSixEight(suffix: String, endpoint: URL?) {
+        // Two bars: [e e e | e e e], then [rest e e | e e e]
+        var seq: [NotatedEvent] = []
+        let notes1: [Pitch] = [.C,.D,.E,.F,.G,.A].map { Pitch(step: $0, alter: 0, octave: 4) }
+        for p in notes1 { seq.append(.init(base: .note(pitch: p, duration: Duration(1,8)))) }
+        seq.append(.init(base: .rest(duration: Duration(1,8))))
+        seq.append(.init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8))))
+        seq.append(.init(base: .note(pitch: Pitch(step: .F, alter: 0, octave: 4), duration: Duration(1,8))))
+        seq.append(.init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: Duration(1,8))))
+        seq.append(.init(base: .note(pitch: Pitch(step: .A, alter: 0, octave: 4), duration: Duration(1,8))))
+        seq.append(.init(base: .note(pitch: Pitch(step: .B, alter: 0, octave: 4), duration: Duration(1,8))))
+        let size = CGSize(width: 800, height: 220)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (6,8)
+        let tree = renderer.layout(events: seq, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let role = suffix.isEmpty ? "offline" : suffix
+        let name = "etude_6_8.\(role).\(SNAP_TAG).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "etude_6_8", events: seq)
+    }
+    if let url = envEndpoint() { snapEtudeSixEight(suffix: "offline", endpoint: nil); snapEtudeSixEight(suffix: "rules", endpoint: url) }
+    else { snapEtudeSixEight(suffix: "offline", endpoint: nil) }
+}
+
+// Glyph Sampler — clefs/keys/time changes visible mid‑score
+do {
+    func snapSamplerMarks(suffix: String, endpoint: URL?) {
+        var events: [NotatedEvent] = []
+        // Start in treble, C major, 4/4
+        events.append(.init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,4))))
+        // Key change to 2 sharps
+        var e1 = NotatedEvent(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,4)))
+        e1.keyChangeFifths = 2; events.append(e1)
+        // Time change to 3/4
+        var e2 = NotatedEvent(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,4)))
+        e2.timeChange = TimeSig(3, 4); events.append(e2)
+        // Clef change to bass
+        var e3 = NotatedEvent(base: .note(pitch: Pitch(step: .F, alter: 0, octave: 3), duration: Duration(1,4)))
+        e3.clefChange = .bass; events.append(e3)
+        let size = CGSize(width: 800, height: 220)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+        let tree = renderer.layout(events: events, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let role = suffix.isEmpty ? "offline" : suffix
+        let name = "sampler_marks.\(role).\(SNAP_TAG).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "sampler_marks", events: events)
+    }
+    if let url = envEndpoint() { snapSamplerMarks(suffix: "offline", endpoint: nil); snapSamplerMarks(suffix: "rules", endpoint: url) }
+    else { snapSamplerMarks(suffix: "offline", endpoint: nil) }
+}
+
+// Glyph Sampler — durations and rests with ledger lines
+do {
+    func snapSamplerDurations(suffix: String, endpoint: URL?) {
+        var events: [NotatedEvent] = []
+        events.append(.init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 5), duration: Duration(1,1))))
+        events.append(.init(base: .note(pitch: Pitch(step: .A, alter: 0, octave: 4), duration: Duration(1,2))))
+        events.append(.init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,4))))
+        events.append(.init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8))))
+        events.append(.init(base: .note(pitch: Pitch(step: .B, alter: 0, octave: 3), duration: Duration(1,16))))
+        events.append(.init(base: .rest(duration: Duration(1,4))))
+        let size = CGSize(width: 800, height: 220)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+        let tree = renderer.layout(events: events, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let role = suffix.isEmpty ? "offline" : suffix
+        let name = "sampler_durations.\(role).\(SNAP_TAG).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "sampler_durations", events: events)
+    }
+    if let url = envEndpoint() { snapSamplerDurations(suffix: "offline", endpoint: nil); snapSamplerDurations(suffix: "rules", endpoint: url) }
+    else { snapSamplerDurations(suffix: "offline", endpoint: nil) }
+}
+
+// Glyph Sampler — accidentals across an octave
+do {
+    func snapSamplerAccidentals(suffix: String, endpoint: URL?) {
+        let pitches: [Pitch] = [
+            Pitch(step: .C, alter: 1, octave: 4),  // C#
+            Pitch(step: .D, alter: -1, octave: 4), // Db
+            Pitch(step: .E, alter: -1, octave: 4), // Eb
+            Pitch(step: .F, alter: 1, octave: 4),  // F#
+            Pitch(step: .G, alter: -1, octave: 4), // Gb
+            Pitch(step: .A, alter: 1, octave: 4),  // A#
+            Pitch(step: .B, alter: -1, octave: 4)  // Bb
+        ]
+        let events: [NotatedEvent] = pitches.map { p in .init(base: .note(pitch: p, duration: Duration(1,4))) }
+        let size = CGSize(width: 800, height: 220)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+        let tree = renderer.layout(events: events, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let role = suffix.isEmpty ? "offline" : suffix
+        let name = "sampler_accidentals.\(role).\(SNAP_TAG).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "sampler_accidentals", events: events)
+    }
+    if let url = envEndpoint() { snapSamplerAccidentals(suffix: "offline", endpoint: nil); snapSamplerAccidentals(suffix: "rules", endpoint: url) }
+    else { snapSamplerAccidentals(suffix: "offline", endpoint: nil) }
+}
+
 print("Wrote snapshots to", outDir.path)
