@@ -24,7 +24,19 @@ func writePNG(_ img: CGImage, to url: URL) {
     CGImageDestinationFinalize(dest)
 }
 
-let outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Snapshots", isDirectory: true)
+let baseDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Snapshots", isDirectory: true)
+let subdir = ProcessInfo.processInfo.environment["SCOREKIT_SNAP_SUBDIR"].flatMap { s in s.isEmpty ? nil : s }
+let outDir: URL = {
+    if let sub = subdir { return baseDir.appendingPathComponent(sub, isDirectory: true) }
+    return baseDir
+}()
+if ProcessInfo.processInfo.environment["SCOREKIT_SNAP_CLEAN"] == "1" {
+    if FileManager.default.fileExists(atPath: outDir.path) {
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: outDir.path) {
+            for name in contents { try? FileManager.default.removeItem(at: outDir.appendingPathComponent(name)) }
+        }
+    }
+}
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
 // Snapshot 1: SimpleRenderer with clef/key/time, accidentals, mixed durations
