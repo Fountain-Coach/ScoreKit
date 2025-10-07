@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import SwiftUI
 import CoreText
+import OpenAPIURLSession
 import ScoreKit
 import RulesKit
 
@@ -54,8 +55,8 @@ public protocol ScoreRenderable {
 }
 
 public struct SimpleRenderer: ScoreRenderable {
-    private let rules = RulesService()
-    public init() {}
+    private let rules: RulesService
+    public init(endpoint: URL? = nil) { self.rules = RulesService(endpoint: endpoint) }
 
     public func layout(events: [NotatedEvent], in rect: CGRect, options: LayoutOptions) -> LayoutTree {
         let staffHeight = options.staffSpacing * 4 // 5 lines = 4 gaps
@@ -298,6 +299,113 @@ public struct SimpleRenderer: ScoreRenderable {
                               stemUp: stemUp,
                               flags: flags,
                               staffSpacing: options.staffSpacing)
+            }
+        }
+
+        // Draw beams for grouped notes.
+        // We use a simple geometric model and, when available, slope guidance from RulesKit.
+        for group in tree.beamGroups {
+            guard group.count >= 2 else { continue }
+            // Stem direction heuristic: majority within group.
+            let middleY = (options.padding.height + options.staffSpacing * 2)
+            var upCount = 0, downCount = 0
+            for idx in group {
+                if idx < tree.elements.count {
+                    let el = tree.elements[idx]
+                    if el.frame.midYVal > middleY { upCount += 1 } else { downCount += 1 }
+                }
+            }
+            let stemUpGroup = upCount >= downCount
+
+            // Optional slope from RulesKit (computed on note positions in staff spaces)
+            var slope: CGFloat? = nil
+            if let endpointStr = ProcessInfo.processInfo.environment["RULES_ENDPOINT"], let endpointURL = URL(string: endpointStr) {
+                var positionsSP: [Double] = []
+                var stems: [Components.Schemas.BeamGeometryInput.stemDirectionsPayloadPayload] = []
+                let centerY = options.padding.height + options.staffSpacing * 2
+                positionsSP.reserveCapacity(group.count)
+                stems.reserveCapacity(group.count)
+                for idx in group {
+                    guard idx < tree.elements.count else { continue }
+                    let el = tree.elements[idx]
+                    let posSP = Double((centerY - el.frame.midYVal) / options.staffSpacing)
+                    positionsSP.append(posSP)
+                    let up = el.frame.midYVal > middleY
+                    stems.append(up ? .up : .down)
+                }
+                // Approximate beam thickness: 0.5 spaces with neutral extra parameter.
+                let thickness = Components.Schemas.BeamGeometryInput.beamThicknessSPPayload(value1: 0.5, value2: 1.0)
+                let input = Operations.RULE_period_Beaming_period_geometry_slope_and_segments.Input(body: .json(.init(notePositionsSP: positionsSP, stemDirections: stems, beamThicknessSP: thickness)))
+                let transport = URLSessionTransport()
+                let client = RulesKit.Client(serverURL: endpointURL, transport: transport)
+                var s: CGFloat?
+                let sema = DispatchSemaphore(value: 0)
+                Task {
+                    defer { sema.signal() }
+                    do {
+                        let out = try await client.RULE_period_Beaming_period_geometry_slope_and_segments(input)
+                        if case let .ok(ok) = out, case let .json(obj) = ok.body {
+                            s = CGFloat(obj.slopeSPPerSpace)
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+                _ = sema.wait(timeout: .now() + 0.030) // 30 ms tight budget
+                slope = s
+            }
+
+            // Beam parameters
+            let t = max(1.0, options.staffSpacing * 0.5) // thickness ~ 0.5 spaces
+            let gap = options.staffSpacing * 0.3
+            // For each adjacent pair, draw min-level beams
+            for i in 0..<(group.count - 1) {
+                let aIdx = group[i], bIdx = group[i+1]
+                guard aIdx < tree.elements.count, bIdx < tree.elements.count else { continue }
+                let a = tree.elements[aIdx]
+                let b = tree.elements[bIdx]
+                let level = min(tree.beamLevels[aIdx], tree.beamLevels[bIdx])
+                guard level > 0 else { continue }
+                // Stem attachment x/y
+                let stemUpA = a.frame.midYVal > middleY
+                let stemUpB = b.frame.midYVal > middleY
+                let halfWA = noteheadHalfWidth(forDen: durationDen(for: a), staffSpacing: options.staffSpacing)
+                let halfWB = noteheadHalfWidth(forDen: durationDen(for: b), staffSpacing: options.staffSpacing)
+                let xA = stemUpA ? (a.frame.midXVal + halfWA) : (a.frame.midXVal - halfWA)
+                let xB = stemUpB ? (b.frame.midXVal + halfWB) : (b.frame.midXVal - halfWB)
+                let yAHead = a.frame.midYVal
+                let yBHead = b.frame.midYVal
+                let stemLength: CGFloat = options.staffSpacing * 3.5
+                let yATip = stemUpA ? (yAHead - stemLength) : (yAHead + stemLength)
+                let yBTip = stemUpB ? (yBHead - stemLength) : (yBHead + stemLength)
+                let m = slope ?? ((yBTip - yATip) / max(1, xB - xA))
+                for k in 0..<level {
+                    if stemUpGroup {
+                        let yTopA = yATip + CGFloat(k) * (t + gap)
+                        let yTopB = yTopA + m * (xB - xA)
+                        let yBotA = yTopA + t
+                        let yBotB = yTopB + t
+                        ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
+                        ctx.beginPath()
+                        ctx.move(to: CGPoint(x: xA, y: yTopA))
+                        ctx.addLine(to: CGPoint(x: xB, y: yTopB))
+                        ctx.addLine(to: CGPoint(x: xB, y: yBotB))
+                        ctx.addLine(to: CGPoint(x: xA, y: yBotA))
+                        ctx.closePath(); ctx.fillPath()
+                    } else {
+                        let yBotA = yATip - CGFloat(k) * (t + gap)
+                        let yBotB = yBotA + m * (xB - xA)
+                        let yTopA = yBotA - t
+                        let yTopB = yBotB - t
+                        ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
+                        ctx.beginPath()
+                        ctx.move(to: CGPoint(x: xA, y: yTopA))
+                        ctx.addLine(to: CGPoint(x: xB, y: yTopB))
+                        ctx.addLine(to: CGPoint(x: xB, y: yBotB))
+                        ctx.addLine(to: CGPoint(x: xA, y: yBotA))
+                        ctx.closePath(); ctx.fillPath()
+                    }
+                }
             }
         }
 

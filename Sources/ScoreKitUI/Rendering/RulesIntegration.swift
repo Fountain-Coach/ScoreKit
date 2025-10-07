@@ -16,6 +16,7 @@ struct RulesService {
             self.endpoint = nil
         }
     }
+    init(endpoint: URL?) { self.endpoint = endpoint }
 
     // Dynamic kerning with optional hairpin/lyrics context.
     func kerningOffset(dynamicRect: CGRect, hairpinRect: CGRect?, staffSpacing: CGFloat) -> CGPoint {
@@ -56,7 +57,7 @@ struct RulesService {
         }
         // Heuristic fallback: small rightward nudge, keep baseline
         return CGPoint(x: max(0, dynamicRect.width * 0.05), y: 0)
-    }
+}
 
     // Remote beaming suggestion with fast fallback.
     // Returns optional groups of indices to beam together, otherwise nil.
