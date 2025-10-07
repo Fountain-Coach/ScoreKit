@@ -47,7 +47,8 @@ jobs:
       - name: Snapshots (offline)
         run: |
           set -euo pipefail
-          SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_SUBDIR=offline swift run -c release ScoreKitSnap || true
+          TAG=$(git rev-parse --short HEAD)
+          SCOREKIT_SNAP_TAG=$TAG SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_SUBDIR=offline swift run -c release ScoreKitSnap || true
       - name: Upload snapshot artifacts (offline)
         uses: actions/upload-artifact@v4
         with:
@@ -59,7 +60,8 @@ jobs:
           RULES_ENDPOINT: ${{ github.event.inputs.rules_endpoint }}
         run: |
           set -euo pipefail
-          SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_SUBDIR=rules swift run -c release ScoreKitSnap || true
+          TAG=$(git rev-parse --short HEAD)
+          SCOREKIT_SNAP_TAG=$TAG SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_SUBDIR=rules swift run -c release ScoreKitSnap || true
       - name: Upload snapshot artifacts (rules)
         if: ${{ github.event.inputs.rules_endpoint != '' }}
         uses: actions/upload-artifact@v4
