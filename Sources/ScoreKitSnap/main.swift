@@ -84,7 +84,13 @@ let SNAP_TAG = resolveTag()
 
 func renderLilyOrFail(name: String, events: [NotatedEvent]) {
     #if ENABLE_LILYPOND
-    let ly = LilyEmitter.emit(notated: events, title: name)
+    // Prefer fixture .ly if available for gold standard; fall back to emitter
+    let fixtures = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Fixtures/Lily", isDirectory: true)
+    let fixtureURL = fixtures.appendingPathComponent("\(name).ly")
+    let ly: String
+    if FileManager.default.fileExists(atPath: fixtureURL.path), let s = try? String(contentsOf: fixtureURL) { ly = s } else {
+        ly = LilyEmitter.emit(notated: events, title: name)
+    }
     do {
         let artifacts = try LilySession().render(lySource: ly, execute: true, formats: [.pdf])
         if let pdf = artifacts.pdfURL {
