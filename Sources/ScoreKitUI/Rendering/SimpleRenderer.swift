@@ -16,6 +16,12 @@ public struct LayoutOptions: Sendable {
     public var clef: Clef = .treble
     // Key signature in fifths: positive = sharps, negative = flats
     public var keySignatureFifths: Int = 0
+    // Beam rendering and RulesKit tuning
+    public var beamThicknessSP: CGFloat = 0.5   // beam thickness in staff spaces
+    public var beamGapSP: CGFloat = 0.3         // gap between beam lines in staff spaces
+    public var rulesKerningBudgetMS: Int = 50   // dynamic kerning request budget
+    public var rulesBeamingGroupsBudgetMS: Int = 50 // beaming groups request budget
+    public var rulesBeamingGeometryBudgetMS: Int = 30 // beam geometry request budget
     public init() {}
 }
 
@@ -148,7 +154,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 marks[i] = LayoutTree.LayoutMarks(clef: clef, keyFifths: keyF, time: t)
             }
         }
-        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
+        let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, options: options)
         return LayoutTree(size: CGSize(width: max(rect.width, width), height: max(rect.height, height)), elements: elements, slurs: slurs, hairpins: hairpins, ties: ties, articulations: artMap, dynamics: dynMap, marks: marks, barX: barX, beatPos: beatPos, beamGroups: beamGroups, beamLevels: beamLevels)
     }
 
@@ -233,7 +239,7 @@ public struct SimpleRenderer: ScoreRenderable {
                                  y: y - options.staffSpacing * 0.6,
                                  width: options.staffSpacing * 1.2,
                                  height: options.staffSpacing * 1.2)
-            let k = rules.kerningOffset(dynamicRect: dynRect, hairpinRect: nil, staffSpacing: options.staffSpacing)
+            let k = rules.kerningOffset(dynamicRect: dynRect, hairpinRect: nil, staffSpacing: options.staffSpacing, budgetMS: options.rulesKerningBudgetMS)
             drawDynamicsSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal + k.x, y: y + k.y), level: dyn, staffSpacing: options.staffSpacing)
         }
 
@@ -351,13 +357,13 @@ public struct SimpleRenderer: ScoreRenderable {
                         // ignore
                     }
                 }
-                _ = sema.wait(timeout: .now() + 0.030) // 30 ms tight budget
+                _ = sema.wait(timeout: .now() + .milliseconds(max(1, options.rulesBeamingGeometryBudgetMS)))
                 slope = s
             }
 
             // Beam parameters
-            let t = max(1.0, options.staffSpacing * 0.5) // thickness ~ 0.5 spaces
-            let gap = options.staffSpacing * 0.3
+            let t = max(1.0, options.staffSpacing * options.beamThicknessSP)
+            let gap = max(0.0, options.staffSpacing * options.beamGapSP)
             // For each adjacent pair, draw min-level beams
             for i in 0..<(group.count - 1) {
                 let aIdx = group[i], bIdx = group[i+1]
@@ -768,7 +774,7 @@ public struct SimpleRenderer: ScoreRenderable {
         let newHeight = max(rect.height, prev.size.height)
 
         // Beam groups/levels recomputed globally (fast enough N)
-        let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
+        let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, options: options)
         var artMap: [Int: [Articulation]] = [:]
         var dynMap: [Int: DynamicLevel] = [:]
         var marks: [Int: LayoutTree.LayoutMarks] = [:]
@@ -852,7 +858,7 @@ public struct SimpleRenderer: ScoreRenderable {
         }
     }
 
-    private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int) -> ([[Int]], [Int]) {
+    private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int, options: LayoutOptions) -> ([[Int]], [Int]) {
         // Build isNote/denoms for optional remote suggestion via RulesKit
         var isNote: [Bool] = []
         var denoms: [Int] = []
@@ -866,7 +872,7 @@ public struct SimpleRenderer: ScoreRenderable {
         }
 
         // Try remote beaming suggestion (50 ms budget). Compute levels locally.
-        if let remoteGroups = rules.beamGroups(beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, isNote: isNote, denoms: denoms), !remoteGroups.isEmpty {
+        if let remoteGroups = rules.beamGroups(beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, isNote: isNote, denoms: denoms, budgetMS: options.rulesBeamingGroupsBudgetMS), !remoteGroups.isEmpty {
             let levels = elements.enumerated().map { idx, el -> Int in
                 switch el.kind { case .note(_, let d): return (d.den >= 8 ? (d.den == 8 ? 1 : (d.den == 16 ? 2 : (d.den >= 32 ? 3 : 0))) : 0); case .rest: return 0 }
             }

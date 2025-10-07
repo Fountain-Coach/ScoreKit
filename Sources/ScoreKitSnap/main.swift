@@ -75,6 +75,38 @@ do {
     if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent("multi_two_voices.png")) }
 }
 
+// Snapshot 2b: Beam geometry (offline + rules if available)
+do {
+    func renderBeams(suffix: String, endpoint: URL?) {
+        // Eighths and sixteenths with varying pitches to tilt beams
+        let seq: [NotatedEvent] = [
+            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,8))),
+            .init(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,8))),
+            .init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,16))),
+            .init(base: .note(pitch: Pitch(step: .F, alter: 0, octave: 4), duration: Duration(1,16))),
+            .init(base: .rest(duration: Duration(1,8))),
+            .init(base: .note(pitch: Pitch(step: .G, alter: 0, octave: 4), duration: Duration(1,8))),
+            .init(base: .note(pitch: Pitch(step: .A, alter: 0, octave: 4), duration: Duration(1,8))),
+            .init(base: .note(pitch: Pitch(step: .B, alter: 0, octave: 4), duration: Duration(1,16))),
+            .init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 5), duration: Duration(1,16)))
+        ]
+        let size = CGSize(width: 640, height: 200)
+        let ctx = makeContext(size: size)
+        let renderer = SimpleRenderer(endpoint: endpoint)
+        var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+        let tree = renderer.layout(events: seq, in: CGRect(origin: .zero, size: size), options: opts)
+        renderer.draw(tree, in: ctx, options: opts)
+        let name = suffix.isEmpty ? "beams_geometry.png" : "beams_geometry.\(suffix).png"
+        if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+    }
+    if let url = envEndpoint() {
+        renderBeams(suffix: "offline", endpoint: nil)
+        renderBeams(suffix: "rules", endpoint: url)
+    } else {
+        renderBeams(suffix: "", endpoint: nil)
+    }
+}
+
 // Snapshot 3: Dynamics kerning (offline + rules if available)
 do {
     func renderDynamics(suffix: String, endpoint: URL?) {
