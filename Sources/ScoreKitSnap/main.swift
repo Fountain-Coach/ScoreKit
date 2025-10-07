@@ -33,14 +33,21 @@ let outDir: URL = {
     if let sub = subdir { return baseDir.appendingPathComponent(sub, isDirectory: true) }
     return baseDir
 }()
+let lilyDir: URL = baseDir.appendingPathComponent("lily", isDirectory: true)
 if ProcessInfo.processInfo.environment["SCOREKIT_SNAP_CLEAN"] == "1" {
     if FileManager.default.fileExists(atPath: outDir.path) {
         if let contents = try? FileManager.default.contentsOfDirectory(atPath: outDir.path) {
             for name in contents { try? FileManager.default.removeItem(at: outDir.appendingPathComponent(name)) }
         }
     }
+    if FileManager.default.fileExists(atPath: lilyDir.path) {
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: lilyDir.path) {
+            for name in contents { try? FileManager.default.removeItem(at: lilyDir.appendingPathComponent(name)) }
+        }
+    }
 }
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+try? FileManager.default.createDirectory(at: lilyDir, withIntermediateDirectories: true)
 
 func resolveTag() -> String {
     let env = ProcessInfo.processInfo.environment
@@ -63,6 +70,27 @@ func resolveTag() -> String {
 }
 let SNAP_TAG = resolveTag()
 
+func maybeRenderLily(name: String, events: [NotatedEvent]) {
+    guard ProcessInfo.processInfo.environment["SCOREKIT_SNAP_LILY"] == "1" else { return }
+    #if ENABLE_LILYPOND
+    let ly = LilyEmitter.emit(notated: events, title: name)
+    do {
+        let artifacts = try LilySession().render(lySource: ly, execute: true, formats: [.pdf])
+        if let pdf = artifacts.pdfURL {
+            let dest = lilyDir.appendingPathComponent("\(name).lily.\(SNAP_TAG).pdf")
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: pdf, to: dest)
+        } else {
+            // write .ly as fallback
+            let destLy = lilyDir.appendingPathComponent("\(name).lily.\(SNAP_TAG).ly")
+            try ly.write(to: destLy, atomically: true, encoding: .utf8)
+        }
+    } catch {
+        // ignore errors; lily optional
+    }
+    #endif
+}
+
 // Snapshot 1: Baseline quarters (C D E F), treble clef, 4/4
 do {
     func snapBaselineQuarters(suffix: String, endpoint: URL?) {
@@ -81,6 +109,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "baseline_quarters.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "baseline_quarters", events: events)
     }
     if let url = envEndpoint() { snapBaselineQuarters(suffix: "offline", endpoint: nil); snapBaselineQuarters(suffix: "rules", endpoint: url) }
     else { snapBaselineQuarters(suffix: "offline", endpoint: nil) }
@@ -101,6 +130,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "beaming_eighths_4_4.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "beaming_eighths_4_4", events: seq)
     }
     if let url = envEndpoint() { snapBeamingEighths(suffix: "offline", endpoint: nil); snapBeamingEighths(suffix: "rules", endpoint: url) }
     else { snapBeamingEighths(suffix: "offline", endpoint: nil) }
@@ -151,6 +181,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "dynamics_mf_hairpin.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
+        maybeRenderLily(name: "dynamics_mf_hairpin", events: events)
     }
     if let url = envEndpoint() { snapDynamics(suffix: "offline", endpoint: nil); snapDynamics(suffix: "rules", endpoint: url) }
     else { snapDynamics(suffix: "offline", endpoint: nil) }
