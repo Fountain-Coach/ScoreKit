@@ -29,7 +29,7 @@ public struct LayoutSlur: Sendable { public let startIndex: Int; public let endI
 public struct LayoutHairpin: Sendable { public let startIndex: Int; public let endIndex: Int; public let crescendo: Bool }
 public struct LayoutTie: Sendable { public let startIndex: Int; public let endIndex: Int }
 
-public struct LayoutTree: Sendable {
+    public struct LayoutTree: Sendable {
     public let size: CGSize
     public let elements: [LayoutElement]
     public let slurs: [LayoutSlur]
@@ -68,7 +68,7 @@ public struct SimpleRenderer: ScoreRenderable {
         var barX: [CGFloat] = []
         var artMap: [Int: [Articulation]] = [:]
         var dynMap: [Int: DynamicLevel] = [:]
-        var marks: [Int: LayoutMarks] = [:]
+        var marks: [Int: LayoutTree.LayoutMarks] = [:]
         let origin = CGPoint(x: options.padding.width, y: options.padding.height)
         let optionsBarIndices = Set(options.barIndices)
 
@@ -144,7 +144,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 let clef = events[i].clefChange
                 let keyF = events[i].keyChangeFifths
                 let t = events[i].timeChange.map { ($0.beatsPerBar, $0.beatUnit) }
-                marks[i] = LayoutMarks(clef: clef, keyFifths: keyF, time: t)
+                marks[i] = LayoutTree.LayoutMarks(clef: clef, keyFifths: keyF, time: t)
             }
         }
         let (beamGroups, beamLevels) = computeBeams(elements: elements, beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
@@ -663,7 +663,7 @@ public struct SimpleRenderer: ScoreRenderable {
         let (beamGroups, beamLevels) = computeBeams(elements: newElements, beatPos: newBeatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit)
         var artMap: [Int: [Articulation]] = [:]
         var dynMap: [Int: DynamicLevel] = [:]
-        var marks: [Int: LayoutMarks] = [:]
+        var marks: [Int: LayoutTree.LayoutMarks] = [:]
         for idx in 0..<events.count {
             if !events[idx].articulations.isEmpty { artMap[idx] = events[idx].articulations }
             if let dyn = events[idx].dynamic { dynMap[idx] = dyn }
@@ -671,7 +671,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 let clef = events[idx].clefChange
                 let keyF = events[idx].keyChangeFifths
                 let t = events[idx].timeChange.map { ($0.beatsPerBar, $0.beatUnit) }
-                marks[idx] = LayoutMarks(clef: clef, keyFifths: keyF, time: t)
+                marks[idx] = LayoutTree.LayoutMarks(clef: clef, keyFifths: keyF, time: t)
             }
         }
         return LayoutTree(size: CGSize(width: newWidth, height: newHeight), elements: newElements, slurs: slurs, hairpins: hairpins, ties: ties, articulations: artMap, dynamics: dynMap, marks: marks, barX: newBarX, beatPos: newBeatPos, beamGroups: beamGroups, beamLevels: beamLevels)
@@ -745,18 +745,59 @@ public struct SimpleRenderer: ScoreRenderable {
     }
 
     private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int) -> ([[Int]], [Int]) {
-        var isNote: [Bool] = []
-        var denoms: [Int] = []
-        isNote.reserveCapacity(elements.count)
-        denoms.reserveCapacity(elements.count)
-        for el in elements {
-            switch el.kind {
-            case .note(_, let d): isNote.append(true); denoms.append(d.den)
-            case .rest: isNote.append(false); denoms.append(0)
+        // Heuristic beaming fallback: group consecutive beamable notes within a primary beat boundary.
+        // Beamable = duration <= 1/8 (den >= 8). Break at rests, non-beamable notes, and beat boundaries.
+        var groups: [[Int]] = []
+        var levels: [Int] = Array(repeating: 0, count: elements.count)
+        guard !elements.isEmpty else { return (groups, levels) }
+
+        // Determine primary beat partitioning
+        // Simple: unit = 1.0 (based on beatUnit)
+        // Compound (6/8, 9/8, 12/8): unit = 3 eighths ⇒ in our beatPos units, this is 3.0 when beatUnit == 8
+        let isCompound = (beatUnit == 8) && (beatsPerBar % 3 == 0)
+        let unit: Double = isCompound ? 3.0 : 1.0
+
+        func groupIndex(for startPos: Double) -> Int {
+            // startPos denotes the position at the start of an event (in beat units).
+            // Exact boundaries should start a new group, so use floor without shifting.
+            return Int(floor(startPos / unit))
+        }
+
+        var current: [Int] = []
+        var currentGroupIdx: Int = -1
+
+        for i in 0..<elements.count {
+            let el = elements[i]
+            let beamLevel: Int = {
+                switch el.kind { case .note(_, let d): return (d.den >= 8 ? (d.den == 8 ? 1 : (d.den == 16 ? 2 : (d.den >= 32 ? 3 : 0))) : 0); case .rest: return 0 }
+            }()
+            let beamable = beamLevel > 0
+            if !beamable {
+                if current.count >= 2 { groups.append(current) }
+                current.removeAll(keepingCapacity: true)
+                currentGroupIdx = -1
+                continue
+            }
+            let startPos: Double = (i == 0) ? 0.0 : beatPos[i - 1]
+            let gi = groupIndex(for: startPos)
+            if current.isEmpty {
+                current.append(i)
+                currentGroupIdx = gi
+                levels[i] = beamLevel
+            } else {
+                // Break group on primary beat boundary change
+                if gi != currentGroupIdx {
+                    if current.count >= 2 { groups.append(current) }
+                    current = [i]
+                    currentGroupIdx = gi
+                } else {
+                    current.append(i)
+                }
+                levels[i] = beamLevel
             }
         }
-        let result = BeamingRules.computeGroups(beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, isNote: isNote, denoms: denoms)
-        return (result.groups, result.levels)
+        if current.count >= 2 { groups.append(current) }
+        return (groups, levels)
     }
 
     private func beamLevelFor(_ el: LayoutElement) -> Int {

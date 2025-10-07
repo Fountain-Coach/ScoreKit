@@ -16,6 +16,10 @@ public enum DynamicLevel: String, Codable, Sendable, Equatable {
     case p, f, mp, mf, pp, ff
 }
 
+public enum ClefType: String, Codable, Sendable, Equatable { case treble, bass }
+
+public struct TimeSig: Codable, Sendable, Equatable { public let beatsPerBar: Int; public let beatUnit: Int; public init(_ b: Int, _ u: Int) { beatsPerBar = b; beatUnit = u } }
+
 public struct NotatedEvent: Codable, Sendable {
     public var base: Event
     public var slurStart: Bool
@@ -26,6 +30,9 @@ public struct NotatedEvent: Codable, Sendable {
     public var hairpinStart: Hairpin?
     public var hairpinEnd: Bool
     public var dynamic: DynamicLevel?
+    public var clefChange: ClefType?
+    public var keyChangeFifths: Int?
+    public var timeChange: TimeSig?
 
     public init(base: Event,
                 slurStart: Bool = false,
@@ -35,7 +42,10 @@ public struct NotatedEvent: Codable, Sendable {
                 hairpinEnd: Bool = false,
                 tieStart: Bool = false,
                 tieEnd: Bool = false,
-                dynamic: DynamicLevel? = nil) {
+                dynamic: DynamicLevel? = nil,
+                clefChange: ClefType? = nil,
+                keyChangeFifths: Int? = nil,
+                timeChange: TimeSig? = nil) {
         self.base = base
         self.slurStart = slurStart
         self.slurEnd = slurEnd
@@ -45,6 +55,9 @@ public struct NotatedEvent: Codable, Sendable {
         self.hairpinStart = hairpinStart
         self.hairpinEnd = hairpinEnd
         self.dynamic = dynamic
+        self.clefChange = clefChange
+        self.keyChangeFifths = keyChangeFifths
+        self.timeChange = timeChange
     }
 }
 

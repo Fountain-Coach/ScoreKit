@@ -25,13 +25,16 @@ let package = Package(
             name: "ScoreKit",
             path: "Sources/ScoreKit",
             swiftSettings: [
-                // LilyPond is deprecated and disabled by default. To enable, define ENABLE_LILYPOND.
-                // .define("ENABLE_LILYPOND")
+                // LilyPond is deprecated and disabled by default. For tests and interop, enable via feature flag.
+                .define("ENABLE_LILYPOND")
             ]
         ),
         .target(
             name: "ScoreKitUI",
-            dependencies: ["ScoreKit", "RulesKit"],
+            dependencies: [
+                "ScoreKit",
+                .product(name: "RulesKit", package: "RulesKit-SPM")
+            ],
             path: "Sources/ScoreKitUI"
         ),
         .testTarget(

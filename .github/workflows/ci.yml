@@ -38,6 +38,15 @@ jobs:
           set -euo pipefail
           swift build -c release -v
           swift run -c release ScoreKitBench | tee bench.txt
+      - name: Snapshots (release)
+        run: |
+          set -euo pipefail
+          swift run -c release ScoreKitSnap || true
+      - name: Upload snapshot artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots
+          path: Snapshots
       - name: Soft perf checks
         run: |
           set -euo pipefail

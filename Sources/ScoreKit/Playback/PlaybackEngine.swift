@@ -8,8 +8,8 @@ public struct Tempo: Sendable, Equatable {
 
 public enum PlaybackError: Error { case empty }
 
-public final class PlaybackEngine: Sendable {
-    public init() {}
+    public final class PlaybackEngine: Sendable {
+        public init() {}
 
     /// Schedule note on/off messages for a simple monophonic voice of notated events.
     /// - Parameters:
@@ -28,9 +28,14 @@ public final class PlaybackEngine: Sendable {
             switch e.base {
             case let .note(p, d):
                 let key = midiFrom(pitch: p)
-                let vel = SemanticsMap.velocity(for: dyns[i])
+                let baseVel = SemanticsMap.velocity(for: dyns[i])
+                var durSec = seconds(for: d, tempo: tempo)
+                var vel = baseVel
+                // Apply articulation shaping (duration scaling and velocity tweaks)
+                if !e.articulations.isEmpty {
+                    (durSec, vel) = applyArticulations(e.articulations, baseDuration: durSec, baseVelocity: baseVel)
+                }
                 scheduled.append(.init(time: t, message: .noteOn(channel: channel, key: key, velocity: vel)))
-                let durSec = seconds(for: d, tempo: tempo)
                 scheduled.append(.init(time: t + durSec, message: .noteOff(channel: channel, key: key, velocity: 0)))
                 t += durSec
             case let .rest(d):
@@ -94,5 +99,24 @@ public final class PlaybackEngine: Sendable {
         ]
         return pairs.min(by: { abs(Int($0.1) - Int(velocity)) < abs(Int($1.1) - Int(velocity)) })!.0
     }
-}
 
+    private func applyArticulations(_ arts: [Articulation], baseDuration: TimeInterval, baseVelocity: UInt16) -> (TimeInterval, UInt16) {
+        var dur = baseDuration
+        var vel = Int(baseVelocity)
+        for a in arts {
+            switch a {
+            case .staccato:
+                dur *= 0.55
+            case .tenuto:
+                dur *= 0.98 // slightly longer is handled via overlap in real engines; keep near-full here
+            case .accent:
+                vel = min(65535, Int(Double(vel) * 1.15))
+                dur *= 0.95
+            case .marcato:
+                vel = min(65535, Int(Double(vel) * 1.25))
+                dur *= 0.90
+            }
+        }
+        return (dur, UInt16(vel))
+    }
+}

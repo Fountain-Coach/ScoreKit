@@ -28,4 +28,28 @@ final class PlaybackTests: XCTestCase {
         XCTAssertLessThan(vel(0), vel(2))
         XCTAssertLessThan(vel(2), vel(4))
     }
+
+    func testArticulationAffectsDurationAndVelocity() throws {
+        let engine = PlaybackEngine()
+        let sink = CollectingSink()
+        let c4 = Pitch(step: .C, alter: 0, octave: 4)
+        // Base event with mf
+        let base = NotatedEvent(base: .note(pitch: c4, duration: Duration(1,4)), dynamic: .mf)
+        // Staccato should shorten duration significantly
+        let stacc = NotatedEvent(base: .note(pitch: c4, duration: Duration(1,4)), articulations: [.staccato], dynamic: .mf)
+        try engine.schedule(events: [base, stacc], channel: 0, tempo: Tempo(bpm: 120), startTime: 0, sink: sink)
+        // Scheduled messages: on/off for base, on/off for stacc
+        XCTAssertEqual(sink.scheduled.count, 4)
+        let baseOn = sink.scheduled[0]; let baseOff = sink.scheduled[1]
+        let staccOn = sink.scheduled[2]; let staccOff = sink.scheduled[3]
+        // Base quarter at 120 BPM = 0.5s
+        XCTAssertEqual(baseOff.time - baseOn.time, 0.5, accuracy: 1e-6)
+        // Staccato shortened to ~0.275s
+        XCTAssertEqual(staccOff.time - staccOn.time, 0.275, accuracy: 1e-3)
+        // Velocities: both > 0 and defined
+        if case let .noteOn(_, _, v0) = baseOn.message, case let .noteOn(_, _, v1) = staccOn.message {
+            XCTAssertGreaterThan(v0, 0)
+            XCTAssertGreaterThan(v1, 0)
+        } else { XCTFail("Expected noteOn messages") }
+    }
 }
