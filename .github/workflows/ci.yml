@@ -29,6 +29,8 @@ jobs:
       DEFAULT_WARN_MS: ${{ github.event.inputs.default_warn_ms || '50' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch Engraving (RulesKit-SPM)
+        run: git clone https://github.com/Fountain-Coach/Engraving.git ../Engraving --depth 1
       - name: Build
         run: swift build -v
       - name: Test
