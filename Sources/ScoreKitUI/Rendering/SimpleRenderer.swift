@@ -80,7 +80,7 @@ public struct SimpleRenderer: ScoreRenderable {
         let optionsBarIndices = Set(options.barIndices)
 
         var cursorX = origin.x
-        var beatsInBar: Int = 0
+        var barProgress: Double = 0
         let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
         let beatUnit = max(1, options.timeSignature.beatUnit)
         var yCache: [Pitch: CGFloat] = [:]
@@ -96,7 +96,7 @@ public struct SimpleRenderer: ScoreRenderable {
                 if let cached = yCache[p] {
                     y = cached
                 } else {
-                    let yy = yOffset(for: p, clef: options.clef, staffSpacing: options.staffSpacing, originY: origin.y)
+                    let yy = StaffCoords.y(for: p, clef: options.clef, originY: origin.y, staffSpacing: options.staffSpacing)
                     yCache[p] = yy; y = yy
                 }
                 frame = CGRect(x: x - 5, y: y - 5, width: 10, height: 10)
@@ -114,12 +114,12 @@ public struct SimpleRenderer: ScoreRenderable {
             beatAccum += frac
             let posInBar = beatAccum.truncatingRemainder(dividingBy: Double(beatsPerBar))
             beatPos.append(posInBar)
-            // insert computed barlines based on time signature
-            let eb = beats(for: e, beatUnit: beatUnit)
-            beatsInBar += eb
-            while beatsInBar >= beatsPerBar {
+            // insert computed barlines based on time signature (fractional beats)
+            let eb = beatFraction(for: e, beatUnit: beatUnit)
+            barProgress += eb
+            while barProgress >= Double(beatsPerBar) {
                 barX.append(cursorX)
-                beatsInBar -= beatsPerBar
+                barProgress -= Double(beatsPerBar)
                 // align accumulator to bar
                 beatAccum = floor(beatAccum)
             }
@@ -182,9 +182,9 @@ public struct SimpleRenderer: ScoreRenderable {
         drawKeySignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, clef: options.clef, fifths: options.keySignatureFifths)
         drawTimeSignatureSMuFL(in: ctx, canvasHeight: tree.size.height, origin: origin, staffSpacing: options.staffSpacing, time: options.timeSignature)
 
-        // Draw barlines
+        // Draw barlines only across the staff region
         let top = options.padding.height
-        let bottom = tree.size.height - options.padding.height
+        let bottom = options.padding.height + options.staffSpacing * 4
         for x in tree.barX {
             ctx.setStrokeColor(CGColor(gray: 0.0, alpha: 1.0))
             ctx.setLineWidth(1)
@@ -675,7 +675,7 @@ public struct SimpleRenderer: ScoreRenderable {
             switch e.base {
             case let .note(p, d):
                 if let cached = yCache[p] { y = cached }
-                else { let yy = yOffset(for: p, clef: options.clef, staffSpacing: options.staffSpacing, originY: origin.y); yCache[p] = yy; y = yy }
+                else { let yy = StaffCoords.y(for: p, clef: options.clef, originY: origin.y, staffSpacing: options.staffSpacing); yCache[p] = yy; y = yy }
                 frame = CGRect(x: cursorX - 5, y: y - 5, width: 10, height: 10)
                 newElements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
             case .rest(_):
@@ -793,23 +793,7 @@ public struct SimpleRenderer: ScoreRenderable {
     }
 
     // MARK: - Helpers
-    // Very rough treble clef mapping: E4 on bottom line; middle C (C4) one ledger below.
-    private func yOffset(for p: Pitch, clef: LayoutOptions.Clef, staffSpacing: CGFloat, originY: CGFloat) -> CGFloat {
-        let stepIndex: Int
-        switch p.step { case .C: stepIndex = 0; case .D: stepIndex = 1; case .E: stepIndex = 2; case .F: stepIndex = 3; case .G: stepIndex = 4; case .A: stepIndex = 5; case .B: stepIndex = 6 }
-        let diatonic = (p.octave - 4) * 7 + stepIndex // relative to C4
-        let c4Y: CGFloat
-        switch clef {
-        case .treble:
-            // Approx: C4 one space below bottom line + a bit
-            c4Y = originY + staffSpacing * 5
-        case .bass:
-            // Approx: C4 one ledger above top line
-            c4Y = originY - staffSpacing
-        }
-        let offset = -CGFloat(diatonic) * (staffSpacing / 2)
-        return c4Y + offset
-    }
+    // yOffset replaced by StaffCoords.y
 
     private func flagCount(for d: Duration) -> Int {
         switch d.den {
@@ -980,24 +964,26 @@ extension SimpleRenderer {
     }
 
     private func drawTrebleClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.8, y: origin.y + staffSpacing * 4.0)
+        // Center the clef around the G4 line (second line from bottom = origin + 3*spacing)
+        let clefPoint = CGPoint(x: origin.x + staffSpacing * 0.5, y: origin.y + staffSpacing * 3.0)
         if SMuFL.isAvailable {
-            let font = smuflFont(ofSize: staffSpacing * 4.6)
-            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: clefPoint, font: font)
+            let font = smuflFont(ofSize: staffSpacing * 4.8)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.trebleClef, at: clefPoint, font: font, alignCenter: true)
         } else {
             let font = systemFont(ofSize: staffSpacing * 2.6)
-            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "G", at: clefPoint, font: font)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "G", at: clefPoint, font: font, alignCenter: true)
         }
     }
 
     private func drawBassClefSMuFL(in ctx: CGContext, canvasHeight: CGFloat, origin: CGPoint, staffSpacing: CGFloat) {
-        let clefPoint = CGPoint(x: origin.x - staffSpacing * 0.6, y: origin.y + staffSpacing * 2.0)
+        // Center the clef around the F3 line (second line from top = origin + 1*spacing)
+        let clefPoint = CGPoint(x: origin.x + staffSpacing * 0.3, y: origin.y + staffSpacing * 1.0)
         if SMuFL.isAvailable {
-            let font = smuflFont(ofSize: staffSpacing * 3.6)
-            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.bassClef, at: clefPoint, font: font)
+            let font = smuflFont(ofSize: staffSpacing * 3.8)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: SMuFL.bassClef, at: clefPoint, font: font, alignCenter: true)
         } else {
             let font = systemFont(ofSize: staffSpacing * 2.2)
-            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "F", at: clefPoint, font: font)
+            drawSMuFLText(ctx, canvasHeight: canvasHeight, text: "F", at: clefPoint, font: font, alignCenter: true)
         }
     }
 

@@ -42,7 +42,7 @@ public struct MultiRenderer {
         var artMap: [Int: [Articulation]] = [:]
         let beatsPerBar = max(1, options.timeSignature.beatsPerBar)
         let beatUnit = max(1, options.timeSignature.beatUnit)
-        var beatsInBar = 0
+        var barProgress: Double = 0
 
         // Precompute per-voice, per-index horizontal offsets for unisons (two voices only for now)
         var offsets: [[CGFloat]] = vv.map { _ in Array(repeating: 0, count: anchorsX.count) }
@@ -54,8 +54,8 @@ public struct MultiRenderer {
                     if p0.step == p1.step && p0.alter == p1.alter && p0.octave == p1.octave {
                         offsets[0][i] = -4; offsets[1][i] = +4
                     } else {
-                        let y0 = trebleYOffset(for: p0, staffSpacing: options.staffSpacing, originY: origin.y)
-                        let y1 = trebleYOffset(for: p1, staffSpacing: options.staffSpacing, originY: origin.y)
+                        let y0 = StaffCoords.y(for: p0, clef: options.clef, originY: origin.y, staffSpacing: options.staffSpacing)
+                        let y1 = StaffCoords.y(for: p1, clef: options.clef, originY: origin.y, staffSpacing: options.staffSpacing)
                         let dy = abs(y0 - y1)
                         if abs(dy - (options.staffSpacing/2)) <= 0.75 {
                             // Second interval: split heads
@@ -82,7 +82,7 @@ public struct MultiRenderer {
                 let frame: CGRect
                 switch e.base {
                 case let .note(p, d):
-                    if let cached = yCache[p] { y = cached } else { let yy = trebleYOffset(for: p, staffSpacing: options.staffSpacing, originY: origin.y); yCache[p] = yy; y = yy }
+                    if let cached = yCache[p] { y = cached } else { let yy = StaffCoords.y(for: p, clef: options.clef, originY: origin.y, staffSpacing: options.staffSpacing); yCache[p] = yy; y = yy }
                     frame = CGRect(x: x - 5, y: y - 5, width: 10, height: 10)
                     elements.append(LayoutElement(index: i, kind: .note(p, d), frame: frame))
                 case .rest(let d):
@@ -92,10 +92,10 @@ public struct MultiRenderer {
                 }
                 voices.append(vi)
                 indexMap[vi][i] = elements.count - 1
-                let eb = beats(for: e, beatUnit: beatUnit)
-                if vi == 0 { // compute barlines from primary voice
-                    beatsInBar += eb
-                    if beatsInBar >= beatsPerBar { barX.append(x + advance(for: e)); beatsInBar -= beatsPerBar }
+                let frac = beatFraction(for: e, beatUnit: beatUnit)
+                if vi == 0 { // primary voice decides barlines (fractional beats)
+                    barProgress += frac
+                    if barProgress >= Double(beatsPerBar) { barX.append(x + advance(for: e)); barProgress -= Double(beatsPerBar) }
                 }
             }
         }
@@ -245,19 +245,19 @@ public struct MultiRenderer {
     }
 
     // MARK: - Helpers (kept in sync with SimpleRenderer)
-    private func trebleYOffset(for p: Pitch, staffSpacing: CGFloat, originY: CGFloat) -> CGFloat {
-        let stepIndex: Int
-        switch p.step { case .C: stepIndex = 0; case .D: stepIndex = 1; case .E: stepIndex = 2; case .F: stepIndex = 3; case .G: stepIndex = 4; case .A: stepIndex = 5; case .B: stepIndex = 6 }
-        let diatonic = (p.octave - 4) * 7 + stepIndex
-        let c4Y = originY + staffSpacing * 5
-        let offset = -CGFloat(diatonic) * (staffSpacing / 2)
-        return c4Y + offset
-    }
+    // y mapping unified in StaffCoords.y
 
     private func beats(for e: NotatedEvent, beatUnit: Int) -> Int {
         switch e.base {
         case .note(_, let d): return max(1, beatUnit / max(1, d.den))
         case .rest(let d): return max(1, beatUnit / max(1, d.den))
+        }
+    }
+
+    private func beatFraction(for e: NotatedEvent, beatUnit: Int) -> Double {
+        switch e.base {
+        case .note(_, let d): return Double(beatUnit) / Double(max(1, d.den))
+        case .rest(let d): return Double(beatUnit) / Double(max(1, d.den))
         }
     }
 

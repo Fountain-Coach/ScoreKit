@@ -16,9 +16,9 @@ let package = Package(
         .executable(name: "ScoreKitVid", targets: ["ScoreKitVid"]),
         .executable(name: "ScoreKitSnap", targets: ["ScoreKitSnap"]),
     ],
-    // Engraving engine (local path) — RulesKit manual API for offline builds.
+    // Engraving engine — RulesKit remote package for geometry heuristics and API.
     dependencies: [
-        .package(path: "../Engraving/codegen/swift/RulesKit-SPM"),
+        .package(url: "https://github.com/Fountain-Coach/RulesKit-SPM.git", from: "0.1.0"),
         .package(url: "https://github.com/apple/swift-openapi-urlsession", from: "1.0.0")
     ],
     targets: [
@@ -72,7 +72,10 @@ let package = Package(
         .executableTarget(
             name: "ScoreKitSnap",
             dependencies: ["ScoreKitUI"],
-            path: "Sources/ScoreKitSnap"
+            path: "Sources/ScoreKitSnap",
+            swiftSettings: [
+                .define("ENABLE_LILYPOND")
+            ]
         ),
     ]
 )
