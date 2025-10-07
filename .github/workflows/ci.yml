@@ -35,6 +35,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fetch Engraving (RulesKit-SPM)
         run: git clone https://github.com/Fountain-Coach/Engraving.git ../Engraving --depth 1
+      - name: Install LilyPond
+        run: |
+          brew update
+          brew install lilypond
       - name: Build
         run: swift build -v
       - name: Test
@@ -62,17 +66,12 @@ jobs:
           set -euo pipefail
           TAG=$(git rev-parse --short HEAD)
           SCOREKIT_SNAP_TAG=$TAG SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_SUBDIR=rules swift run -c release ScoreKitSnap || true
-      - name: Snapshots (lily PDFs if available)
+      - name: Snapshots (lily PDFs)
         run: |
           set -euo pipefail
-          if command -v lilypond >/dev/null 2>&1 ; then
-            TAG=$(git rev-parse --short HEAD)
-            SCOREKIT_SNAP_TAG=$TAG SCOREKIT_SNAP_CLEAN=1 SCOREKIT_SNAP_LILY=1 swift run -c release ScoreKitSnap || true
-          else
-            echo "LilyPond not found; skipping lily snapshots"
-          fi
+          TAG=$(git rev-parse --short HEAD)
+          SCOREKIT_SNAP_TAG=$TAG SCOREKIT_SNAP_CLEAN=1 swift run -c release ScoreKitSnap || true
       - name: Upload lily artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: snapshots-lily

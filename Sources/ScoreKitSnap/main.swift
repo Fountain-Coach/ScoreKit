@@ -52,9 +52,21 @@ try? FileManager.default.createDirectory(at: lilyDir, withIntermediateDirectorie
 func resolveTag() -> String {
     let env = ProcessInfo.processInfo.environment
     if let t = env["SCOREKIT_SNAP_TAG"], !t.isEmpty { return t }
-    // Try git short hash
+    // Find git root by walking up to a .git directory
+    var dir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let fm = FileManager.default
+    var maxUp = 10
+    var gitRoot: URL? = nil
+    while maxUp > 0 {
+        if fm.fileExists(atPath: dir.appendingPathComponent(".git").path) { gitRoot = dir; break }
+        let parent = dir.deletingLastPathComponent()
+        if parent.path == dir.path { break }
+        dir = parent; maxUp -= 1
+    }
+    let root = gitRoot ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
     let git = Process()
     git.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    git.currentDirectoryURL = root
     git.arguments = ["git", "rev-parse", "--short", "HEAD"]
     let pipe = Pipe(); git.standardOutput = pipe
     try? git.run(); git.waitUntilExit()
@@ -70,8 +82,7 @@ func resolveTag() -> String {
 }
 let SNAP_TAG = resolveTag()
 
-func maybeRenderLily(name: String, events: [NotatedEvent]) {
-    guard ProcessInfo.processInfo.environment["SCOREKIT_SNAP_LILY"] == "1" else { return }
+func renderLilyOrFail(name: String, events: [NotatedEvent]) {
     #if ENABLE_LILYPOND
     let ly = LilyEmitter.emit(notated: events, title: name)
     do {
@@ -81,13 +92,16 @@ func maybeRenderLily(name: String, events: [NotatedEvent]) {
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.copyItem(at: pdf, to: dest)
         } else {
-            // write .ly as fallback
-            let destLy = lilyDir.appendingPathComponent("\(name).lily.\(SNAP_TAG).ly")
-            try ly.write(to: destLy, atomically: true, encoding: .utf8)
+            fputs("LilyPond did not produce PDF for \(name)\n", stderr)
+            exit(2)
         }
     } catch {
-        // ignore errors; lily optional
+        fputs("LilyPond render failed for \(name): \(error)\n", stderr)
+        exit(2)
     }
+    #else
+    fputs("LilyPond support disabled at build time. Enable ENABLE_LILYPOND.\n", stderr)
+    exit(2)
     #endif
 }
 
@@ -109,7 +123,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "baseline_quarters.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "baseline_quarters", events: events)
+        renderLilyOrFail(name: "baseline_quarters", events: events)
     }
     if let url = envEndpoint() { snapBaselineQuarters(suffix: "offline", endpoint: nil); snapBaselineQuarters(suffix: "rules", endpoint: url) }
     else { snapBaselineQuarters(suffix: "offline", endpoint: nil) }
@@ -130,7 +144,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "beaming_eighths_4_4.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "beaming_eighths_4_4", events: seq)
+        renderLilyOrFail(name: "beaming_eighths_4_4", events: seq)
     }
     if let url = envEndpoint() { snapBeamingEighths(suffix: "offline", endpoint: nil); snapBeamingEighths(suffix: "rules", endpoint: url) }
     else { snapBeamingEighths(suffix: "offline", endpoint: nil) }
@@ -181,7 +195,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "dynamics_mf_hairpin.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "dynamics_mf_hairpin", events: events)
+        renderLilyOrFail(name: "dynamics_mf_hairpin", events: events)
     }
     if let url = envEndpoint() { snapDynamics(suffix: "offline", endpoint: nil); snapDynamics(suffix: "rules", endpoint: url) }
     else { snapDynamics(suffix: "offline", endpoint: nil) }
@@ -223,7 +237,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "ode_to_joy_excerpt.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "ode_to_joy_excerpt", events: events)
+        renderLilyOrFail(name: "ode_to_joy_excerpt", events: events)
     }
     if let url = envEndpoint() { snapOdeToJoy(suffix: "offline", endpoint: nil); snapOdeToJoy(suffix: "rules", endpoint: url) }
     else { snapOdeToJoy(suffix: "offline", endpoint: nil) }
@@ -251,7 +265,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "etude_6_8.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "etude_6_8", events: seq)
+        renderLilyOrFail(name: "etude_6_8", events: seq)
     }
     if let url = envEndpoint() { snapEtudeSixEight(suffix: "offline", endpoint: nil); snapEtudeSixEight(suffix: "rules", endpoint: url) }
     else { snapEtudeSixEight(suffix: "offline", endpoint: nil) }
@@ -281,7 +295,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "sampler_marks.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "sampler_marks", events: events)
+        renderLilyOrFail(name: "sampler_marks", events: events)
     }
     if let url = envEndpoint() { snapSamplerMarks(suffix: "offline", endpoint: nil); snapSamplerMarks(suffix: "rules", endpoint: url) }
     else { snapSamplerMarks(suffix: "offline", endpoint: nil) }
@@ -306,7 +320,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "sampler_durations.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "sampler_durations", events: events)
+        renderLilyOrFail(name: "sampler_durations", events: events)
     }
     if let url = envEndpoint() { snapSamplerDurations(suffix: "offline", endpoint: nil); snapSamplerDurations(suffix: "rules", endpoint: url) }
     else { snapSamplerDurations(suffix: "offline", endpoint: nil) }
@@ -334,7 +348,7 @@ do {
         let role = suffix.isEmpty ? "offline" : suffix
         let name = "sampler_accidentals.\(role).\(SNAP_TAG).png"
         if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent(name)) }
-        maybeRenderLily(name: "sampler_accidentals", events: events)
+        renderLilyOrFail(name: "sampler_accidentals", events: events)
     }
     if let url = envEndpoint() { snapSamplerAccidentals(suffix: "offline", endpoint: nil); snapSamplerAccidentals(suffix: "rules", endpoint: url) }
     else { snapSamplerAccidentals(suffix: "offline", endpoint: nil) }
