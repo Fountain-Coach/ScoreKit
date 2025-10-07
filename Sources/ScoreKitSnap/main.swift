@@ -63,3 +63,18 @@ do {
 
 print("Wrote snapshots to", outDir.path)
 
+// Snapshot 3: Dynamics kerning baseline (offline heuristic)
+do {
+    var events: [NotatedEvent] = []
+    events.append(.init(base: .note(pitch: Pitch(step: .C, alter: 0, octave: 4), duration: Duration(1,4)), dynamic: .mf))
+    events.append(.init(base: .note(pitch: Pitch(step: .D, alter: 0, octave: 4), duration: Duration(1,8)), hairpinStart: .crescendo))
+    events.append(.init(base: .note(pitch: Pitch(step: .E, alter: 0, octave: 4), duration: Duration(1,8))))
+    events.append(.init(base: .note(pitch: Pitch(step: .F, alter: 0, octave: 4), duration: Duration(1,4)), hairpinEnd: true, dynamic: .ff))
+    let size = CGSize(width: 480, height: 200)
+    let ctx = makeContext(size: size)
+    let renderer = SimpleRenderer()
+    var opts = LayoutOptions(); opts.clef = .treble; opts.keySignatureFifths = 0; opts.timeSignature = (4,4)
+    let tree = renderer.layout(events: events, in: CGRect(origin: .zero, size: size), options: opts)
+    renderer.draw(tree, in: ctx, options: opts)
+    if let img = ctx.makeImage() { writePNG(img, to: outDir.appendingPathComponent("dynamics_kerning.png")) }
+}

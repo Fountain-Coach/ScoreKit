@@ -232,7 +232,7 @@ public struct SimpleRenderer: ScoreRenderable {
                                  y: y - options.staffSpacing * 0.6,
                                  width: options.staffSpacing * 1.2,
                                  height: options.staffSpacing * 1.2)
-            let k = rules.kerningOffset(dynamicRect: dynRect, hairpinRect: nil)
+            let k = rules.kerningOffset(dynamicRect: dynRect, hairpinRect: nil, staffSpacing: options.staffSpacing)
             drawDynamicsSMuFL(in: ctx, canvasHeight: tree.size.height, at: CGPoint(x: el.frame.midXVal + k.x, y: y + k.y), level: dyn, staffSpacing: options.staffSpacing)
         }
 
@@ -745,27 +745,37 @@ public struct SimpleRenderer: ScoreRenderable {
     }
 
     private func computeBeams(elements: [LayoutElement], beatPos: [Double], beatsPerBar: Int, beatUnit: Int) -> ([[Int]], [Int]) {
-        // Heuristic beaming fallback: group consecutive beamable notes within a primary beat boundary.
-        // Beamable = duration <= 1/8 (den >= 8). Break at rests, non-beamable notes, and beat boundaries.
+        // Build isNote/denoms for optional remote suggestion via RulesKit
+        var isNote: [Bool] = []
+        var denoms: [Int] = []
+        isNote.reserveCapacity(elements.count)
+        denoms.reserveCapacity(elements.count)
+        for el in elements {
+            switch el.kind {
+            case .note(_, let d): isNote.append(true); denoms.append(d.den)
+            case .rest: isNote.append(false); denoms.append(0)
+            }
+        }
+
+        // Try remote beaming suggestion (50 ms budget). Compute levels locally.
+        if let remoteGroups = rules.beamGroups(beatPos: beatPos, beatsPerBar: beatsPerBar, beatUnit: beatUnit, isNote: isNote, denoms: denoms), !remoteGroups.isEmpty {
+            let levels = elements.enumerated().map { idx, el -> Int in
+                switch el.kind { case .note(_, let d): return (d.den >= 8 ? (d.den == 8 ? 1 : (d.den == 16 ? 2 : (d.den >= 32 ? 3 : 0))) : 0); case .rest: return 0 }
+            }
+            return (remoteGroups, levels)
+        }
+
+        // Heuristic fallback: group consecutive beamable notes within a primary beat boundary.
         var groups: [[Int]] = []
         var levels: [Int] = Array(repeating: 0, count: elements.count)
         guard !elements.isEmpty else { return (groups, levels) }
 
-        // Determine primary beat partitioning
-        // Simple: unit = 1.0 (based on beatUnit)
-        // Compound (6/8, 9/8, 12/8): unit = 3 eighths ⇒ in our beatPos units, this is 3.0 when beatUnit == 8
         let isCompound = (beatUnit == 8) && (beatsPerBar % 3 == 0)
         let unit: Double = isCompound ? 3.0 : 1.0
-
-        func groupIndex(for startPos: Double) -> Int {
-            // startPos denotes the position at the start of an event (in beat units).
-            // Exact boundaries should start a new group, so use floor without shifting.
-            return Int(floor(startPos / unit))
-        }
+        func groupIndex(for startPos: Double) -> Int { Int(floor(startPos / unit)) }
 
         var current: [Int] = []
         var currentGroupIdx: Int = -1
-
         for i in 0..<elements.count {
             let el = elements[i]
             let beamLevel: Int = {
@@ -785,7 +795,6 @@ public struct SimpleRenderer: ScoreRenderable {
                 currentGroupIdx = gi
                 levels[i] = beamLevel
             } else {
-                // Break group on primary beat boundary change
                 if gi != currentGroupIdx {
                     if current.count >= 2 { groups.append(current) }
                     current = [i]
