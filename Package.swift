@@ -18,7 +18,8 @@ let package = Package(
     ],
     // Engraving engine (local path) — RulesKit manual API for offline builds.
     dependencies: [
-        .package(path: "../Engraving/codegen/swift/RulesKit-SPM")
+        .package(path: "../Engraving/codegen/swift/RulesKit-SPM"),
+        .package(url: "https://github.com/apple/swift-openapi-urlsession", from: "1.0.0")
     ],
     targets: [
         .target(
@@ -33,7 +34,8 @@ let package = Package(
             name: "ScoreKitUI",
             dependencies: [
                 "ScoreKit",
-                .product(name: "RulesKit", package: "RulesKit-SPM")
+                .product(name: "RulesKit", package: "RulesKit-SPM"),
+                .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession")
             ],
             path: "Sources/ScoreKitUI"
         ),
