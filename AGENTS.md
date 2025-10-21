@@ -1,6 +1,10 @@
 # AGENTS.md — ScoreKit Engineering Guide (Fountain‑Coach / AudioTalk)
 
-This document guides contributors and agents building ScoreKit — the notation and real‑time rendering layer described in “ScoreKit: Unifying Notation and Real‑Time Rendering in Fountain‑Coach”. It operationalizes the vision from AudioTalk into concrete architecture, conventions, and milestones for this repository.
+This document guides contributors and agents building ScoreKit — the notation and real‑time rendering layer. For historical narrative and the Drift–Pattern–Reflection vision, see the Legacy Docs repository:
+
+- https://github.com/Fountain-Coach/AudioTalk-LegacyDocs
+
+This file focuses on current, code‑level guidance and integration with the Engraving authority.
 
 ## Scope
 - Applies to the entire repository, with emphasis on:
