@@ -138,4 +138,79 @@ struct RulesService {
         }
         return nil
     }
+
+    // Vertical stack offsets: returns y offsets in points for provided bboxes.
+    // Uses RULE.VerticalAlign.stack_and_padding_policy when endpoint is available.
+    func verticalStackOffsets(bboxes: [CGRect], staffSpacing: CGFloat, minGapSP: CGFloat = 0.5, budgetMS: Int) -> [CGFloat]? {
+        guard let endpoint, !bboxes.isEmpty else { return nil }
+        let toSP: (CGRect) -> Components.Schemas.BBox = { r in
+            .init(x: Double(r.minX / staffSpacing), y: Double(r.minY / staffSpacing), w: Double(r.width / staffSpacing), h: Double(r.height / staffSpacing))
+        }
+        let payload = Components.Schemas.VerticalAlignStackInput(bboxes: bboxes.map(toSP), minGapSP: Double(minGapSP))
+        let input = Operations.RULE_period_VerticalAlign_period_stack_and_padding_policy.Input(body: .json(payload))
+        let transport = URLSessionTransport()
+        let client = RulesKit.Client(serverURL: endpoint, transport: transport)
+        let sema = DispatchSemaphore(value: 0)
+        final class Box { var out: [Double]? }
+        let box = Box()
+        Task {
+            defer { sema.signal() }
+            do {
+                let resp = try await client.RULE_period_VerticalAlign_period_stack_and_padding_policy(input)
+                if case let .ok(ok) = resp, case let .json(obj) = ok.body {
+                    box.out = obj.yOffsetsSP
+                }
+            } catch {}
+        }
+        _ = sema.wait(timeout: .now() + .milliseconds(max(1, budgetMS)))
+        return box.out?.map { CGFloat($0) * staffSpacing }
+    }
+
+    // Break-align anchor x offsets across system breaks.
+    func breakAlignOffsets(anchors: [Double], defaultOffsetSP: Double = 0.0, staffSpacing: CGFloat, budgetMS: Int) -> [CGFloat]? {
+        guard let endpoint, !anchors.isEmpty else { return nil }
+        let payload = Components.Schemas.BreakAlignAnchorInput(anchors: anchors, defaultOffsetSP: defaultOffsetSP)
+        let input = Operations.RULE_period_BreakAlign_period_anchor_offsets_policy.Input(body: .json(payload))
+        let transport = URLSessionTransport()
+        let client = RulesKit.Client(serverURL: endpoint, transport: transport)
+        let sema = DispatchSemaphore(value: 0)
+        final class Box { var out: [Double]? }
+        let box = Box()
+        Task {
+            defer { sema.signal() }
+            do {
+                let resp = try await client.RULE_period_BreakAlign_period_anchor_offsets_policy(input)
+                if case let .ok(ok) = resp, case let .json(obj) = ok.body {
+                    box.out = obj.xOffsetsSP
+                }
+            } catch {}
+        }
+        _ = sema.wait(timeout: .now() + .milliseconds(max(1, budgetMS)))
+        return box.out?.map { CGFloat($0) * staffSpacing }
+    }
+
+    // Glissando placement offset (y), considering nearby grobs.
+    func glissandoYOffset(glissandoRect: CGRect, nearby: [CGRect], staffSpacing: CGFloat, minGapSP: CGFloat = 0.25, budgetMS: Int) -> CGFloat? {
+        guard let endpoint else { return nil }
+        let toSP: (CGRect) -> Components.Schemas.BBox = { r in
+            .init(x: Double(r.minX / staffSpacing), y: Double(r.minY / staffSpacing), w: Double(r.width / staffSpacing), h: Double(r.height / staffSpacing))
+        }
+        let payload = Components.Schemas.GlissandoPlacementInput(glissandoBBox: toSP(glissandoRect), nearbyGrobs: nearby.map(toSP), minGapSP: Double(minGapSP))
+        let input = Operations.RULE_period_Glissando_period_placement_policy.Input(body: .json(payload))
+        let transport = URLSessionTransport()
+        let client = RulesKit.Client(serverURL: endpoint, transport: transport)
+        let sema = DispatchSemaphore(value: 0)
+        final class Box { var y: Double? }
+        let box = Box()
+        Task {
+            defer { sema.signal() }
+            do {
+                let resp = try await client.RULE_period_Glissando_period_placement_policy(input)
+                if case let .ok(ok) = resp, case let .json(obj) = ok.body { box.y = obj.yOffsetSP }
+            } catch {}
+        }
+        _ = sema.wait(timeout: .now() + .milliseconds(max(1, budgetMS)))
+        if let y = box.y { return CGFloat(y) * staffSpacing }
+        return nil
+    }
 }
