@@ -23,6 +23,10 @@ Roadmap
 - See `AGENTS.md` for architecture, milestones (M0–M8), and conventions
  - See `STATUS-AUDIT.md` for the current audit, prioritized gaps, and hook‑in plan
 
+Engraving Parity
+- Engraving scoreboard: https://github.com/Fountain-Coach/Engraving/blob/main/SCOREBOARD.md
+- Engraving audit: https://github.com/Fountain-Coach/Engraving/blob/main/AUDIT.md
+
 **In Plain English**
 - Think of ScoreKit as two things working together:
   - A printing brain: It speaks LilyPond to make publication‑quality sheet music when you need it.
